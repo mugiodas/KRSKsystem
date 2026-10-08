@@ -325,3 +325,78 @@ input, select, textarea { font: inherit; color: inherit; }
 .m-notice.INFO { background: var(--blue-050); color: var(--navy-800); border-left: 4px solid var(--blue-500); }
 .m-rest { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--info-bg); border-radius: 12px; font-size: 12.5px; color: var(--ink-700); }
 @media (min-width: 640px) { .m-shell { max-width: 520px; margin: 0 auto; box-shadow: 0 0 40px rgba(8, 20, 40, 0.2); } }
+
+/* ---------------- Phase 6: printable event report ---------------- */
+.report-panel .panel-body { padding: 0; }
+.report-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 16px; }
+.report-panel .muted { color: var(--ink-500); font-weight: 500; }
+.report-time { font-family: var(--mono); font-size: 10.5px; }
+
+.report-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 2px solid var(--navy-800); }
+.report-title h3 { margin: 0; font-size: 17px; letter-spacing: 0.01em; color: var(--navy-900); }
+.report-title span { font-size: 11.5px; color: var(--ink-500); }
+
+.report-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.report-kpi {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  background: var(--surface-alt); border: 1px solid var(--line); border-radius: var(--radius);
+  border-left: 3px solid var(--blue-500);
+}
+.report-kpi.is-warn { border-left-color: var(--urgent); background: #fdf5f5; }
+.report-kpi.is-ok { border-left-color: var(--ok); }
+.report-kpi-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--ink-500); }
+.report-kpi-value { font-size: 21px; font-weight: 800; line-height: 1.1; color: var(--navy-900); font-variant-numeric: tabular-nums; }
+.report-kpi-note { font-size: 10.5px; color: var(--ink-500); }
+
+.report-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.report-block { border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 11px 11px; background: #fff; }
+.report-block h4 { margin: 0 0 8px; font-size: 11.5px; letter-spacing: 0.05em; color: var(--navy-800); }
+.report-bar-row { display: grid; grid-template-columns: 58px 1fr 96px; align-items: center; gap: 8px; margin-bottom: 5px; }
+.report-bar-label { font-size: 11px; font-weight: 700; color: var(--ink-500); font-variant-numeric: tabular-nums; }
+.report-bar-track { height: 8px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; }
+.report-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--navy-800), var(--blue-600)); }
+.report-bar-value { font-size: 10.5px; color: var(--ink-700); text-align: right; font-variant-numeric: tabular-nums; }
+.report-warn { margin: 6px 0 0; font-size: 11px; color: var(--urgent); font-weight: 600; }
+
+.report-dl { margin: 0; display: grid; gap: 5px; }
+.report-dl > div { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; border-bottom: 1px dashed var(--line); padding-bottom: 4px; }
+.report-dl dt { color: var(--ink-500); }
+.report-dl dd { margin: 0; font-weight: 700; color: var(--navy-900); font-variant-numeric: tabular-nums; }
+.report-dl .danger, .report-table .danger { color: var(--urgent); }
+
+.report-tabs { display: flex; gap: 4px; margin-bottom: 7px; }
+.report-tabs .chip { cursor: pointer; border: 1px solid var(--line); background: #fff; }
+.report-table-wrap { max-height: 44vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.report-table { width: 100%; }
+.report-table th { position: sticky; top: 0; background: var(--surface-alt); z-index: 1; }
+.report-table td, .report-table th { padding: 4px 7px; font-size: 11.5px; }
+.report-row-cold td { background: #fdf6f6; }
+
+.report-qa { background: var(--surface-alt); }
+.report-qa-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.report-qa-head h4 { margin: 0; }
+.report-qa p { margin: 0; font-size: 11.5px; }
+.report-note { margin: 6px 0 0; font-size: 10.5px; }
+.report-ok { margin: 6px 0 0; font-size: 11px; color: var(--ok); font-weight: 600; }
+.report-qa-head button { margin-left: auto; }
+.report-qa-list { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.report-qa-list li { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+.report-qa-list code { font-family: var(--mono); font-size: 10.5px; background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+@media (max-width: 1080px) {
+  .report-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Printing the report should give the gym a clean A4 sheet, not the whole dashboard. */
+@media print {
+  .topbar, .tabs, .rail, .fab, .m-tabbar, .toast-host, .report-tabs, .report-qa-head button { display: none !important; }
+  .app-shell, .dash-grid, .panel, .panel-body, .report-body { display: block; overflow: visible; max-height: none; height: auto; }
+  body { background: #fff; }
+  .panel { border: 0; box-shadow: none; }
+  .report-panel .panel-head { border-bottom: 1px solid #999; }
+  .report-table-wrap { max-height: none; overflow: visible; border: 0; }
+  .report-table th { position: static; }
+  .report-block, .report-kpi { break-inside: avoid; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .report-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

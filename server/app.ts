@@ -13,6 +13,9 @@ import { createRequestRouter } from './routes/requests.js';
 import { createEngineRouter } from './routes/engine.js';
 import { createAnnouncementRouter } from './routes/announcements.js';
 import { createParticipantRouter } from './routes/participant.js';
+import { createReportRouter } from './routes/report.js';
+import { createSnapshotRouter } from './routes/snapshot.js';
+import { gzipJson } from './gzip.js';
 import { maybeRunEngine } from './services/autoEngine.js';
 
 export function createApp(db: DB) {
@@ -25,6 +28,7 @@ export function createApp(db: DB) {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     next();
   });
+  app.use(gzipJson);
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   app.use(authMiddleware(db));
@@ -74,6 +78,8 @@ export function createApp(db: DB) {
   app.use('/api', requireAuth, createEngineRouter(db, (eventId) => maybeRunEngine(db, eventId)));
   app.use('/api', requireAuth, createAnnouncementRouter(db));
   app.use('/api', requireAuth, createParticipantRouter(db));
+  app.use('/api', requireAuth, createReportRouter(db));
+  app.use('/api', requireAuth, createSnapshotRouter(db));
 
   const dist = resolve('dist');
   if (process.env.NODE_ENV === 'production' && existsSync(dist)) {

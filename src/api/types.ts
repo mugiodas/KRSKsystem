@@ -197,6 +197,18 @@ export interface BlockedCandidate extends Omit<EngineCandidate, 'breakdown' | 's
   reasonLabel: string;
 }
 
+export interface EventSnapshot {
+  eventId: string;
+  fetchedAt: string;
+  event: EventDetail;
+  courts: CourtRow[];
+  matches: MatchRow[];
+  allMatches: MatchRow[];
+  participants: ParticipantRow[];
+  requests: RequestRow[];
+  engine: EngineState;
+}
+
 export interface EngineState {
   ranAt: string;
   eventId: string;
@@ -216,7 +228,8 @@ export interface EngineState {
   freeCourtCount: number;
   queue: Array<{ matchId: string; phase: string; playerAName: string; playerBName: string; scheduledTime: string | null }>;
   waitingPlayers: WaitingPlayer[];
-  evaluatedPairs: number;
+  /** Null on the polled snapshot: candidate scoring only runs when the modal asks for it. */
+  evaluatedPairs: number | null;
   candidates: EngineCandidate[];
   blocked: BlockedCandidate[];
   blockedCounts: Record<string, number>;
@@ -231,7 +244,8 @@ export interface EngineRunResult {
   assignedQueue: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string }>;
   created: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string; score: number }>;
   candidates: EngineCandidate[];
-  evaluatedPairs: number;
+  /** Null on the polled snapshot: candidate scoring only runs when the modal asks for it. */
+  evaluatedPairs: number | null;
   blocked: BlockedCandidate[];
   blockedCounts: Record<string, number>;
   skippedReasons: Record<string, number>;
@@ -338,4 +352,73 @@ export interface MyMatchView {
 export interface AnnouncementRow {
   announcementId: string; eventId: string; title: string; body: string;
   severity: 'INFO' | 'IMPORTANT' | 'URGENT'; active: number; createdAt: string; actorName?: string | null;
+}
+
+/** One participant's line in the event report. */
+export interface ParticipantReportRow {
+  participantId: string;
+  name: string;
+  className: string | null;
+  club: string;
+  rating: number;
+  checkedIn: boolean;
+  played: number;
+  wins: number;
+  losses: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDifference: number;
+  winRate: number;
+  totalWaitingMinutes: number;
+  longestWaitingMinutes: number;
+  requestCount: number;
+  requestFulfilled: number;
+  noShows: number;
+}
+
+export interface IntegrityViolation {
+  code: string;
+  severity: 'CRITICAL' | 'WARNING';
+  count: number;
+  sample: string | null;
+}
+
+/** The integrity self-check (spec section 43): the same rules QA runs after every event. */
+export interface IntegrityReport {
+  eventId: string;
+  checkedAt: string;
+  checks: number;
+  violations: IntegrityViolation[];
+  clean: boolean;
+}
+
+/** Event report (Phase 6): every figure is computed from stored rows, never estimated. */
+export interface EventReport {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  venue: string;
+  status: string;
+  eventMode: string;
+  phase: string;
+  generatedAt: string;
+  window: { start: string; end: string; plannedMinutes: number; actualLastMatch: string | null; playedMinutes: number };
+  participants: { registered: number; active: number; checkedIn: number; classes: number };
+  matches: {
+    total: number; completed: number; cancelled: number; noShow: number; pendingResult: number;
+    bySource: Record<string, number>; byPhase: Record<string, number>;
+  };
+  matchCount: { total: number; avg: number; min: number; max: number; spread: number; zeroMatchPlayers: number; histogram: Array<{ matches: number; players: number }> };
+  waiting: {
+    avgMinutes: number; maxMinutes: number; over30Players: number; p90Minutes: number; samples: number;
+    longestIdleMinutes: number; idleOver30Players: number; idlePlayers: number;
+  };
+  courts: { count: number; utilization: number; busyMinutes: number; availableMinutes: number; perCourt: Array<{ courtId: string; courtName: string; matches: number; busyMinutes: number; utilization: number }> };
+  requests: { total: number; active: number; matched: number; cancelled: number; expired: number; fulfillmentRate: number };
+  fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
+  automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
+  noShows: { count: number; affectedPlayers: number; rate: number };
+  integrity: IntegrityReport;
+  standings: Array<{ className: string | null; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
+  rows: ParticipantReportRow[];
 }

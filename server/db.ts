@@ -226,6 +226,7 @@ export function migrate(db: DB): void {
       after_json TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_announcements_event ON announcements(event_id, active DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_logs(event_id, created_at DESC);
 
     CREATE TRIGGER IF NOT EXISTS participant_class_same_event_insert

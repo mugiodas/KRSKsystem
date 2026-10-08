@@ -5,32 +5,15 @@ import { asRows } from '../db.js';
 import { requireRole, type AuthedRequest } from '../auth.js';
 import { sendData } from '../http.js';
 import { audit, ensureEventAccess, requireEvent } from './core.js';
-import { evaluateCandidates, loadEngineContext, runEngine, type EngineContext } from '../services/matching.js';
+import { evaluateCandidates, loadEngineContext, runEngine } from '../services/matching.js';
+import { buildEngineState } from '../services/engineState.js';
 
 function param(req: AuthedRequest, key: string): string {
   const value = req.params[key];
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
-export function describeWaitingPlayers(ctx: EngineContext) {
-  return [...ctx.players.values()]
-    .filter((player) => !ctx.busyPlayerIds.has(player.participantId))
-    .map((player) => ({
-      participantId: player.participantId,
-      name: player.name,
-      className: player.className,
-      rating: player.rating,
-      played: player.played,
-      wins: player.wins,
-      waitingMinutes: Number(player.waitingMinutes.toFixed(1)),
-      lastEndTime: player.lastEndTime ? new Date(player.lastEndTime).toISOString() : null,
-      restReady: ctx.nowMs >= player.restReadyAt,
-      restReadyInMinutes: Number((Math.max(0, (player.restReadyAt - ctx.nowMs) / 60_000)).toFixed(1)),
-      activeRequests: ctx.requests.filter((request) => request.requesterId === player.participantId
-        || request.targetPlayerId === player.participantId).length,
-    }))
-    .sort((left, right) => right.waitingMinutes - left.waitingMinutes || left.played - right.played);
-}
+export { describeWaitingPlayers } from '../services/engineState.js';
 
 export function createEngineRouter(db: DB, afterRun?: (eventId: string) => void): Router {
   const router = Router();
@@ -39,52 +22,21 @@ export function createEngineRouter(db: DB, afterRun?: (eventId: string) => void)
     const eventId = param(req, 'eventId');
     ensureEventAccess(db, req, eventId);
     requireEvent(db, eventId);
-    const ctx = loadEngineContext(db, eventId);
-    const { candidates, blocked, blockedCounts, eligible, reportLimit } = evaluateCandidates(ctx, { maxPairs: 20 });
-    const isParticipant = req.auth?.role === 'PARTICIPANT';
-    sendData(res, {
-      ranAt: new Date(ctx.nowMs).toISOString(),
-      eventId,
-      eventName: ctx.event.event_name,
-      phase: ctx.event.current_phase,
-      eventMode: ctx.event.event_mode,
-      eventStatus: ctx.event.status,
-      engineEnabled: ctx.event.auto_engine_enabled === 1,
-      autoCourtAssignment: ctx.event.auto_court_assignment === 1,
-      allowRequest: ctx.event.allow_request === 1,
-      remainingMinutes: Number(ctx.remainingMinutes.toFixed(1)),
-      matchSlotMinutes: ctx.matchSlotMinutes,
-      timeProtected: ctx.timeProtected,
-      eligibleCount: eligible.length,
-      busyPlayerCount: ctx.busyPlayerIds.size,
-      courts: ctx.courts.map((court) => ({
-        courtId: court.courtId, courtNumber: court.courtNumber, courtName: court.courtName,
-        status: court.status, busy: court.busy, free: ctx.freeCourts.some((item) => item.courtId === court.courtId),
-      })),
-      freeCourtCount: ctx.freeCourts.length,
-      queue: ctx.queue.map((match) => ({
-        matchId: match.matchId, phase: match.phase,
-        playerAName: ctx.players.get(match.playerAId)?.name ?? match.playerAId,
-        playerBName: ctx.players.get(match.playerBId)?.name ?? match.playerBId,
-        scheduledTime: match.scheduledTime,
-      })),
-      waitingPlayers: isParticipant
-        ? describeWaitingPlayers(ctx).map((player) => ({
-          participantId: player.participantId, name: player.name, waitingMinutes: player.waitingMinutes,
-          played: player.played, restReady: player.restReady,
-        }))
-        : describeWaitingPlayers(ctx),
-      evaluatedPairs: candidates.length,
-      candidates: isParticipant ? [] : candidates.slice(0, reportLimit),
-      blocked: isParticipant ? [] : blocked,
-      blockedCounts: isParticipant ? {} : blockedCounts,
-      weights: {
-        requestPriority: ctx.event.weight_request_priority, waiting: ctx.event.weight_waiting,
-        matchBalance: ctx.event.weight_match_balance, unplayed: ctx.event.weight_unplayed,
-        rating: ctx.event.weight_rating, timeFit: ctx.event.weight_time_fit,
-        recentPenalty: ctx.event.penalty_recent, repeatPenalty: ctx.event.penalty_repeat,
-      },
-    });
+    sendData(res, buildEngineState(db, eventId, {
+      maxPairs: Number(req.query.maxPairs ?? 20),
+      participantView: req.auth?.role === 'PARTICIPANT',
+    }));
+  });
+
+  /**
+   * The polled board view. Everything a dashboard tab needs, in one request,
+   * with candidate evaluation skipped: the same figures, a fraction of the work.
+   */
+  router.get('/events/:eventId/engine/snapshot', (req: AuthedRequest, res: Response) => {
+    const eventId = param(req, 'eventId');
+    ensureEventAccess(db, req, eventId);
+    requireEvent(db, eventId);
+    sendData(res, buildEngineState(db, eventId, { light: true, participantView: req.auth?.role === 'PARTICIPANT' }));
   });
 
   router.post('/events/:eventId/engine/preview', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {

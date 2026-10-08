@@ -94,6 +94,35 @@ function parseScore(input: { scoreA: number; scoreB: number }, match: Record<str
   return { winnerId: input.scoreA > input.scoreB ? match.player_a_id : match.player_b_id };
 }
 
+/** One match query for both the list endpoint and the snapshot, so the board
+ * never shows different fields than the endpoint it replaced. */
+export function readMatches(db: DB, eventId: string, options: {
+  status?: string | null; phase?: string | null; participantId?: string | null; limit?: number;
+} = {}) {
+  const status = options.status ?? null;
+  const phase = options.phase ?? null;
+  const participantId = options.participantId ?? null;
+  const limit = Math.min(500, Math.max(1, options.limit ?? 200));
+  const rows = asRows<Record<string, any>>(db.prepare(`SELECT m.*,
+    pa.name AS player_a_name, pb.name AS player_b_name, pa.club AS player_a_club, pb.club AS player_b_club,
+    c.court_name, c.court_number, cl.class_name
+    FROM matches m JOIN participants pa ON pa.participant_id = m.player_a_id
+    JOIN participants pb ON pb.participant_id = m.player_b_id
+    LEFT JOIN courts c ON c.court_id = m.court_id LEFT JOIN classes cl ON cl.class_id = m.class_id
+    WHERE m.event_id = ? AND (? IS NULL OR m.status = ?) AND (? IS NULL OR m.phase = ?)
+    AND (? IS NULL OR ? IN (m.player_a_id, m.player_b_id))
+    ORDER BY CASE m.status WHEN 'PLAYING' THEN 1 WHEN 'RESULT_PENDING' THEN 2 WHEN 'COURT_ASSIGNED' THEN 3 WHEN 'CALLED' THEN 4 WHEN 'WAITING' THEN 5 ELSE 6 END,
+      COALESCE(m.scheduled_time, m.created_at), m.created_at LIMIT ?`).all(
+        eventId, status, status, phase, phase, participantId, participantId, limit,
+      ));
+  rows.forEach((row) => {
+    if (row.score_breakdown) {
+      try { row.score_breakdown = JSON.parse(row.score_breakdown); } catch { /* no-op */ }
+    }
+  });
+  return rows;
+}
+
 export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) => void): Router {
   const router = Router();
 
@@ -135,23 +164,7 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     const phase = typeof req.query.phase === 'string' ? req.query.phase : null;
     const participantId = req.auth?.role === 'PARTICIPANT' ? req.auth.participantId : typeof req.query.participantId === 'string' ? req.query.participantId : null;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 200)));
-    const rows = asRows<Record<string, any>>(db.prepare(`SELECT m.*,
-      pa.name AS player_a_name, pb.name AS player_b_name, pa.club AS player_a_club, pb.club AS player_b_club,
-      c.court_name, c.court_number, cl.class_name
-      FROM matches m JOIN participants pa ON pa.participant_id = m.player_a_id
-      JOIN participants pb ON pb.participant_id = m.player_b_id
-      LEFT JOIN courts c ON c.court_id = m.court_id LEFT JOIN classes cl ON cl.class_id = m.class_id
-      WHERE m.event_id = ? AND (? IS NULL OR m.status = ?) AND (? IS NULL OR m.phase = ?)
-      AND (? IS NULL OR ? IN (m.player_a_id, m.player_b_id))
-      ORDER BY CASE m.status WHEN 'PLAYING' THEN 1 WHEN 'RESULT_PENDING' THEN 2 WHEN 'COURT_ASSIGNED' THEN 3 WHEN 'CALLED' THEN 4 WHEN 'WAITING' THEN 5 ELSE 6 END,
-        COALESCE(m.scheduled_time, m.created_at), m.created_at LIMIT ?`).all(
-          eventId, status, status, phase, phase, participantId, participantId, limit,
-        ));
-    rows.forEach((row) => {
-      if (row.score_breakdown) {
-        try { row.score_breakdown = JSON.parse(row.score_breakdown); } catch { /* no-op */ }
-      }
-    });
+    const rows = readMatches(db, eventId, { status, phase, participantId, limit });
     sendData(res, rows);
   });
 

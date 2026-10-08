@@ -22,6 +22,14 @@ const requestSelect = `SELECT r.request_id, r.event_id, r.requester_id, r.target
   LEFT JOIN matches m ON m.match_id = r.matched_match_id
   LEFT JOIN courts c ON c.court_id = m.court_id`;
 
+/** Shared with the snapshot endpoint so both list exactly the same requests. */
+export function readRequests(db: DB, eventId: string, status: string | null = null) {
+  return asRows<Record<string, any>>(db.prepare(`${requestSelect}
+    WHERE r.event_id = ? AND (? IS NULL OR r.status = ?)
+    ORDER BY CASE r.status WHEN 'ACTIVE' THEN 1 WHEN 'MATCHED' THEN 2 ELSE 3 END, r.priority, r.created_at DESC
+    LIMIT 300`).all(eventId, status, status));
+}
+
 /** Participants may only see the identity fields they need to choose an opponent. */
 function sanitize(row: Record<string, any>, role: string, viewerId: string | null): Record<string, any> {
   if (role !== 'PARTICIPANT') return row;
@@ -48,10 +56,7 @@ export function createRequestRouter(db: DB): Router {
     ensureEventAccess(db, req, eventId);
     requireEvent(db, eventId);
     const status = typeof req.query.status === 'string' ? req.query.status : null;
-    const rows = asRows<Record<string, any>>(db.prepare(`${requestSelect}
-      WHERE r.event_id = ? AND (? IS NULL OR r.status = ?)
-      ORDER BY CASE r.status WHEN 'ACTIVE' THEN 1 WHEN 'MATCHED' THEN 2 ELSE 3 END, r.priority, r.created_at DESC
-      LIMIT 300`).all(eventId, status, status));
+    const rows = readRequests(db, eventId, status);
     const role = req.auth?.role ?? 'VIEWER';
     const viewerId = req.auth?.participantId ?? null;
     const visible = role === 'PARTICIPANT'

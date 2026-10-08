@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Activity, BarChart3, ClipboardList, ListChecks, LogOut, Radio, RefreshCw, Settings2, Smartphone, Wand2, Zap, ZapOff } from 'lucide-react';
+import { Activity, BarChart3, ClipboardList, FileBarChart2, ListChecks, LogOut, Radio, RefreshCw, Settings2, Smartphone, Wand2, Zap, ZapOff } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import type { DashboardAlert } from '../lib/alerts';
 import type { EngineState } from '../api/types';
@@ -20,6 +20,7 @@ import { RankingPanel } from '../components/dashboard/RankingPanel';
 import { RequestPanel } from '../components/dashboard/RequestPanel';
 import { AuditPanel } from '../components/dashboard/AuditPanel';
 import { AnnouncementsPanel } from '../components/dashboard/AnnouncementsPanel';
+import { ReportPanel } from '../components/dashboard/ReportPanel';
 import { Chip, SEVERITY_LABEL, useToast } from '../components/ui';
 import { clockTime, minutesBetween, parseIso } from '../lib/time';
 
@@ -39,7 +40,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const nowMs = useNow(1000);
   const [modal, setModal] = useState<Modal>(null);
-  const [tab, setTab] = useState<'board' | 'ranking' | 'requests' | 'announcements' | 'audit'>('board');
+  const [tab, setTab] = useState<'board' | 'ranking' | 'requests' | 'announcements' | 'audit' | 'report'>('board');
   const [selected, setSelected] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -182,6 +183,7 @@ export function DashboardPage() {
               <button aria-selected={tab === 'requests'} onClick={() => setTab('requests')}>対戦希望</button>
               <button aria-selected={tab === 'announcements'} onClick={() => setTab('announcements')}>お知らせ配信</button>
               {canOperate ? <button aria-selected={tab === 'audit'} onClick={() => setTab('audit')}>操作ログ</button> : null}
+              <button aria-selected={tab === 'report'} onClick={() => setTab('report')}><FileBarChart2 size={11} style={{ verticalAlign: -1 }} /> 大会レポート</button>
             </div>
             {event.autoEngineEnabled === 1 ? (
               <Chip tone="ok" dot><Radio size={10} /> 自動進行 ON：結果入力で次のカードを自動割当</Chip>
@@ -248,6 +250,7 @@ export function DashboardPage() {
           ) : null}
           {tab === 'announcements' ? <AnnouncementsPanel eventId={eventId} canOperate={canOperate} /> : null}
           {tab === 'audit' && canOperate ? <AuditPanel eventId={eventId} /> : null}
+          {tab === 'report' ? <ReportPanel eventId={eventId} /> : null}
         </div>
       </div>
 
@@ -291,7 +294,10 @@ function EngineHint({ engine, nowMs }: { engine: EngineState | null; nowMs: numb
       <header className="panel-head">
         <h2>ENGINE</h2>
         <span className="spacer" />
-        <span className="hint">評価 {engine.evaluatedPairs}組・{clockTime(engine.ranAt)} 時点（{Math.round(minutesBetween(parseIso(engine.ranAt) ?? nowMs, nowMs))}分前）</span>
+        <span className="hint">
+          {engine.evaluatedPairs !== null ? `評価 ${engine.evaluatedPairs}組・` : ''}
+          {clockTime(engine.ranAt)} 時点（{Math.round(minutesBetween(parseIso(engine.ranAt) ?? nowMs, nowMs))}分前）
+        </span>
       </header>
       <div className="panel-body">
         <div className="kv">

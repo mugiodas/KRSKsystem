@@ -5,6 +5,7 @@ import { seedDatabase } from '../server/seed.js';
 import { createApp } from '../server/app.js';
 import { runEngine } from '../server/services/matching.js';
 import { normalizeName } from '../server/seed.js';
+import { runIntegrityChecks } from '../server/services/integrity.js';
 
 let db: DB;
 let agent: TestAgent;
@@ -96,35 +97,7 @@ function createScenarioEvent(scenario: Scenario): { eventId: string; classId: st
 }
 
 function checkInvariants(eventId: string): string[] {
-  const violations: string[] = [];
-  const openFilter = "status IN ('CALLED','COURT_ASSIGNED','PLAYING','RESULT_PENDING')";
-  const doublePlayers = db.prepare(`SELECT player, COUNT(*) AS total FROM (
-    SELECT player_a_id AS player FROM matches WHERE event_id = ? AND ${openFilter}
-    UNION ALL SELECT player_b_id FROM matches WHERE event_id = ? AND ${openFilter}
-  ) GROUP BY player HAVING total > 1`).all(eventId, eventId);
-  if (doublePlayers.length) violations.push(`participant_in_multiple_open_matches:${doublePlayers.length}`);
-
-  const doubleCourts = db.prepare(`SELECT court_id, COUNT(*) AS total FROM matches
-    WHERE event_id = ? AND court_id IS NOT NULL AND ${openFilter} GROUP BY court_id HAVING total > 1`).all(eventId);
-  if (doubleCourts.length) violations.push(`court_double_booked:${doubleCourts.length}`);
-
-  const doublePairs = db.prepare(`SELECT pair_key, COUNT(*) AS total FROM matches
-    WHERE event_id = ? AND pair_key IS NOT NULL AND ${openFilter} GROUP BY pair_key HAVING total > 1`).all(eventId);
-  if (doublePairs.length) violations.push(`duplicate_open_pair:${doublePairs.length}`);
-
-  const orphan = db.prepare(`SELECT COUNT(*) AS total FROM matches m WHERE m.event_id = ? AND (
-    NOT EXISTS (SELECT 1 FROM participants p WHERE p.participant_id = m.player_a_id AND p.event_id = m.event_id)
-    OR NOT EXISTS (SELECT 1 FROM participants p WHERE p.participant_id = m.player_b_id AND p.event_id = m.event_id)
-    OR (m.court_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM courts c WHERE c.court_id = m.court_id AND c.event_id = m.event_id))
-  )`).get(eventId) as { total: number };
-  if (Number(orphan.total) > 0) violations.push(`orphan_reference:${orphan.total}`);
-
-  const badScore = db.prepare(`SELECT COUNT(*) AS total FROM matches WHERE event_id = ?
-    AND status = 'COMPLETED' AND (score_a IS NULL OR score_b IS NULL OR score_a = score_b
-      OR (winner_id <> player_a_id AND winner_id <> player_b_id))`).get(eventId) as { total: number };
-  if (Number(badScore.total) > 0) violations.push(`invalid_completed_score:${badScore.total}`);
-
-  return violations;
+  return runIntegrityChecks(db, eventId).violations.map((violation) => `${violation.code}:${violation.count}`);
 }
 
 function simulate(scenario: Scenario): SimResult {
@@ -139,8 +112,14 @@ function simulate(scenario: Scenario): SimResult {
   let slowestPassMs = 0;
   let playedMinutes = 0;
 
-  const complete = db.prepare(`UPDATE matches SET status = 'COMPLETED', score_a = 15, score_b = 11,
-    winner_id = player_a_id, end_time = ?, updated_at = ? WHERE event_id = ? AND status = 'COURT_ASSIGNED'`);
+  // Finish matches the way the API does — result row plus result_id pointer —
+  // otherwise the shared integrity rules are right to report half written rows.
+  const openIds = db.prepare(`SELECT match_id, player_a_id FROM matches
+    WHERE event_id = ? AND status = 'COURT_ASSIGNED'`);
+  const insertResult = db.prepare(`INSERT INTO results (result_id, match_id, score_a, score_b, winner_id, entered_by, status, entered_at, updated_at)
+    VALUES (?, ?, 15, 11, ?, ?, 'ENTERED', ?, ?)`);
+  const completeOne = db.prepare(`UPDATE matches SET status = 'COMPLETED', score_a = 15, score_b = 11,
+    winner_id = player_a_id, result_id = ?, end_time = ?, updated_at = ? WHERE match_id = ?`);
 
   while (now <= endMs - slotMinutes * 60_000) {
     const startedAt = Date.now();
@@ -161,7 +140,12 @@ function simulate(scenario: Scenario): SimResult {
       maxWaiting = Math.max(maxWaiting, since);
     }
 
-    complete.run(new Date(now + scenario.matchMinutes * 60_000).toISOString(), new Date(now + scenario.matchMinutes * 60_000).toISOString(), eventId);
+    const stamp = new Date(now + scenario.matchMinutes * 60_000).toISOString();
+    for (const row of openIds.all(eventId) as Array<{ match_id: string; player_a_id: string }>) {
+      const resultId = makeId('result');
+      insertResult.run(resultId, row.match_id, row.player_a_id, ownerId, stamp, stamp);
+      completeOne.run(resultId, stamp, stamp, row.match_id);
+    }
     db.prepare(`UPDATE courts SET status = 'AVAILABLE' WHERE event_id = ?`).run(eventId);
     now += scenario.tickMinutes * 60_000;
   }

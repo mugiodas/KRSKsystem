@@ -18,9 +18,9 @@ export interface Snapshot {
 const ACTIVE_STATUSES = ['WAITING', 'CALLED', 'COURT_ASSIGNED', 'PLAYING', 'RESULT_PENDING'];
 
 /**
- * One polling loop per screen. The dashboard never guesses state locally:
- * every panel renders what the API returned, so two operators on two laptops
- * see the same board and a stale tab simply shows a "data age" warning.
+ * One polling loop per screen, one request per poll. The dashboard never guesses
+ * state locally: every panel renders what the API returned, so two operators on two
+ * laptops see the same board and a stale tab simply shows a "data age" warning.
  */
 export function useEventSnapshot(eventId: string | null, intervalMs = 4000) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -34,18 +34,14 @@ export function useEventSnapshot(eventId: string | null, intervalMs = 4000) {
     inFlight.current = true;
     if (!options.silent) setBusy(true);
     try {
-      const [event, courts, allMatches, participants, requests, engine] = await Promise.all([
-        api.event(eventId),
-        api.courts(eventId),
-        api.matches(eventId, '?limit=500'),
-        api.participants(eventId),
-        api.requests(eventId).catch(() => [] as RequestRow[]),
-        api.engineState(eventId).catch(() => null),
-      ]);
+      // A single request carries the whole board: six parallel calls per poll
+      // were the busiest thing on the venue Wi-Fi.
+      const data = await api.snapshot(eventId);
       if (!alive.current) return;
-      const recent = allMatches.filter((match) => ACTIVE_STATUSES.includes(match.status)
-        || Date.now() - new Date(match.updatedAt).getTime() < 30 * 60_000);
-      setSnapshot({ event, courts, matches: recent, allMatches: allMatches, participants, requests, engine, fetchedAt: Date.now() });
+      setSnapshot({
+        event: data.event, courts: data.courts, matches: data.matches, allMatches: data.allMatches,
+        participants: data.participants, requests: data.requests, engine: data.engine, fetchedAt: Date.now(),
+      });
       setError(null);
     } catch (caught) {
       if (alive.current) setError(caught instanceof ApiError ? caught.message : '大会データの取得に失敗しました。');

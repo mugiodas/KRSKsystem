@@ -8,11 +8,13 @@
     "dev": "concurrently -k -n API,WEB -c blue,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --host 0.0.0.0",
+    "demo:reset": "node scripts/reset-demo.mjs",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsc -b --pretty false"
+    "check": "tsc -b --pretty false",
+    "integrity": "tsx scripts/check-integrity.ts"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

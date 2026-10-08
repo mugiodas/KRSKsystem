@@ -110,6 +110,58 @@ function audit(db: DB, req: AuthedRequest, eventId: string, entityType: string, 
       before === undefined ? null : JSON.stringify(before), after === undefined ? null : JSON.stringify(after), nowIso());
 }
 
+/**
+ * The reads below are shared with the polled snapshot endpoint, so the board and
+ * the individual endpoints can never drift apart on what a row contains.
+ */
+export function readEventDetail(db: DB, eventId: string) {
+  const event = requireEvent(db, eventId);
+  const classes = asRows(db.prepare('SELECT * FROM classes WHERE event_id = ? ORDER BY display_order, class_name').all(eventId));
+  const summary = db.prepare(`SELECT
+    (SELECT COUNT(*) FROM participants WHERE event_id = ? AND active = 1) AS participant_count,
+    (SELECT COUNT(*) FROM participants WHERE event_id = ? AND active = 1 AND checked_in = 1) AS checked_in_count,
+    (SELECT COUNT(*) FROM courts WHERE event_id = ? AND enabled = 1) AS court_count,
+    (SELECT COUNT(*) FROM matches WHERE event_id = ?) AS match_count,
+    (SELECT COUNT(*) FROM matches WHERE event_id = ? AND status = 'COMPLETED') AS completed_match_count
+  `).get(eventId, eventId, eventId, eventId, eventId);
+  return { ...event, classes, summary };
+}
+
+export function readCourts(db: DB, eventId: string) {
+  return asRows(db.prepare(`SELECT c.*,
+    (SELECT match_id FROM matches m WHERE m.court_id = c.court_id AND m.status IN ('COURT_ASSIGNED','PLAYING','RESULT_PENDING') ORDER BY m.updated_at DESC LIMIT 1) AS current_match_id
+    FROM courts c WHERE c.event_id = ? ORDER BY c.priority, c.court_number`).all(eventId));
+}
+
+export function readParticipants(db: DB, eventId: string, options: { search?: string | null; active?: number | null; classId?: string | null } = {}) {
+  const search = options.search ? `%${options.search}%` : '%';
+  const active = options.active ?? null;
+  const classId = options.classId ?? null;
+  // played/wins used to be two correlated COUNT subqueries per participant, which
+  // cost ~45ms per poll once a 400 player event had a few hundred finished matches.
+  // One pre-aggregated pass over the event's matches is the same answer, far cheaper.
+  return asRows<Record<string, any>>(db.prepare(`SELECT p.*, c.class_name,
+    COALESCE(stats.played, 0) AS played, COALESCE(stats.wins, 0) AS wins
+    FROM participants p
+    LEFT JOIN classes c ON c.class_id = p.class_id
+    LEFT JOIN (
+      SELECT entrant.participant_id,
+        COUNT(*) AS played,
+        SUM(CASE WHEN entrant.winner_id = entrant.participant_id THEN 1 ELSE 0 END) AS wins
+      FROM (
+        SELECT m.player_a_id AS participant_id, m.winner_id FROM matches m WHERE m.event_id = ? AND m.status = 'COMPLETED'
+        UNION ALL
+        SELECT m.player_b_id AS participant_id, m.winner_id FROM matches m WHERE m.event_id = ? AND m.status = 'COMPLETED'
+      ) entrant
+      GROUP BY entrant.participant_id
+    ) stats ON stats.participant_id = p.participant_id
+    WHERE p.event_id = ? AND (p.name LIKE ? OR p.name_kana LIKE ? OR p.club LIKE ?)
+    AND (? IS NULL OR p.active = ?) AND (? IS NULL OR p.class_id = ?)
+    ORDER BY p.active DESC, c.display_order, p.name_kana, p.name`).all(
+      eventId, eventId, eventId, search, search, search, active, active, classId, classId,
+    ));
+}
+
 export function createCoreRouter(db: DB): Router {
   const router = Router();
 
@@ -145,16 +197,7 @@ export function createCoreRouter(db: DB): Router {
 
   router.get('/events/:eventId', (req: AuthedRequest, res: Response) => {
     ensureEventAccess(db, req, param(req, 'eventId'));
-    const event = requireEvent(db, param(req, 'eventId'));
-    const classes = asRows(db.prepare('SELECT * FROM classes WHERE event_id = ? ORDER BY display_order, class_name').all(param(req, 'eventId')));
-    const summary = db.prepare(`SELECT
-      (SELECT COUNT(*) FROM participants WHERE event_id = ? AND active = 1) AS participant_count,
-      (SELECT COUNT(*) FROM participants WHERE event_id = ? AND active = 1 AND checked_in = 1) AS checked_in_count,
-      (SELECT COUNT(*) FROM courts WHERE event_id = ? AND enabled = 1) AS court_count,
-      (SELECT COUNT(*) FROM matches WHERE event_id = ?) AS match_count,
-      (SELECT COUNT(*) FROM matches WHERE event_id = ? AND status = 'COMPLETED') AS completed_match_count
-    `).get(param(req, 'eventId'), param(req, 'eventId'), param(req, 'eventId'), param(req, 'eventId'), param(req, 'eventId'));
-    sendData(res, { ...event, classes, summary });
+    sendData(res, readEventDetail(db, param(req, 'eventId')));
   });
 
   router.patch('/events/:eventId', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
@@ -247,18 +290,11 @@ export function createCoreRouter(db: DB): Router {
   router.get('/events/:eventId/participants', (req: AuthedRequest, res: Response) => {
     ensureEventAccess(db, req, param(req, 'eventId'));
     requireEvent(db, param(req, 'eventId'));
-    const search = typeof req.query.search === 'string' ? `%${req.query.search.trim()}%` : '%';
-    const active = req.query.active === undefined ? null : req.query.active === 'true' ? 1 : 0;
-    const classId = typeof req.query.classId === 'string' ? req.query.classId : null;
-    const rows = asRows(db.prepare(`SELECT p.*, c.class_name,
-      (SELECT COUNT(*) FROM matches m WHERE m.event_id = p.event_id AND m.status = 'COMPLETED' AND p.participant_id IN (m.player_a_id, m.player_b_id)) AS played,
-      (SELECT COUNT(*) FROM matches m WHERE m.event_id = p.event_id AND m.status = 'COMPLETED' AND m.winner_id = p.participant_id) AS wins
-      FROM participants p LEFT JOIN classes c ON c.class_id = p.class_id
-      WHERE p.event_id = ? AND (p.name LIKE ? OR p.name_kana LIKE ? OR p.club LIKE ?)
-      AND (? IS NULL OR p.active = ?) AND (? IS NULL OR p.class_id = ?)
-      ORDER BY p.active DESC, c.display_order, p.name_kana, p.name`).all(
-        param(req, 'eventId'), search, search, search, active, active, classId, classId,
-      ));
+    const rows = readParticipants(db, param(req, 'eventId'), {
+      search: typeof req.query.search === 'string' ? req.query.search.trim() : null,
+      active: req.query.active === undefined ? null : req.query.active === 'true' ? 1 : 0,
+      classId: typeof req.query.classId === 'string' ? req.query.classId : null,
+    });
     if (req.auth?.role === 'PARTICIPANT') {
       const safeRows = rows.map((row) => {
         const { name_kana: _kana, row_version: _version, ...safe } = row as Record<string, unknown>;
@@ -330,9 +366,7 @@ export function createCoreRouter(db: DB): Router {
   router.get('/events/:eventId/courts', (req: AuthedRequest, res: Response) => {
     ensureEventAccess(db, req, param(req, 'eventId'));
     requireEvent(db, param(req, 'eventId'));
-    sendData(res, asRows(db.prepare(`SELECT c.*,
-      (SELECT match_id FROM matches m WHERE m.court_id = c.court_id AND m.status IN ('COURT_ASSIGNED','PLAYING','RESULT_PENDING') ORDER BY m.updated_at DESC LIMIT 1) AS current_match_id
-      FROM courts c WHERE c.event_id = ? ORDER BY c.priority, c.court_number`).all(param(req, 'eventId'))));
+    sendData(res, readCourts(db, param(req, 'eventId')));
   });
 
   router.post('/events/:eventId/courts', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {

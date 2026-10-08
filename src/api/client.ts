@@ -1,6 +1,6 @@
 import type {
   AnnouncementRow, CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
-  MyMatchView, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
+  EventReport, EventSnapshot, IntegrityReport, MyMatchView, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
 } from './types';
 
 export class ApiError extends Error {
@@ -126,6 +126,15 @@ export const api = {
     call<AnnouncementRow>('POST', `/events/${eventId}/announcements`, { title, body, severity }),
   patchAnnouncement: (eventId: string, announcementId: string, patch: Record<string, unknown>) =>
     call<AnnouncementRow>('PATCH', `/events/${eventId}/announcements/${announcementId}`, patch),
+
+  /** One polled round trip for the whole operator board. */
+  snapshot: (eventId: string) => call<EventSnapshot>('GET', `/events/${eventId}/snapshot`),
+
+  /** Phase 6: printable report + integrity self-check, both computed server side. */
+  report: (eventId: string) => call<EventReport>('GET', `/events/${eventId}/report`),
+  integrity: (eventId: string) => call<IntegrityReport>('GET', `/events/${eventId}/integrity`),
+  /** Plain CSV endpoint, so the browser download manager handles the file. */
+  reportCsvUrl: (eventId: string) => `${BASE}/events/${eventId}/report.csv`,
 
   rankings: (eventId: string, classId?: string) => call<RankingRow[]>('GET', `/events/${eventId}/rankings${classId ? `?classId=${classId}` : ''}`),
   audit: (eventId: string, limit = 40) => call<Array<Record<string, unknown>>>('GET', `/events/${eventId}/audit?limit=${limit}`),

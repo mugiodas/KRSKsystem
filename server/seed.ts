@@ -111,15 +111,20 @@ function seedDemoMatches(db: DB, ownerId: string | null): void {
       ['seed_match_06', 'demo_p17', 'demo_p18', 15, 13, 18],
       ['seed_match_07', 'demo_p01', 'demo_p05', 15, 12, 14],
       ['seed_match_08', 'demo_p02', 'demo_p06', 11, 15, 12],
+      // A rematch for two of them, so the demo shows realised waiting time and a
+      // player who has already played more than once.
+      ['seed_match_09', 'demo_p07', 'demo_p09', 15, 12, 6],
     ] as const;
-    for (const [id, a, b, scoreA, scoreB, endedAgo] of completed) {
+    for (const [index, [id, a, b, scoreA, scoreB, endedAgo]] of completed.entries()) {
       const resultId = `seed_result_${id.slice(-2)}`;
       const classId = Number(a.slice(-2)) <= 10 ? 'cls_demo_a' : 'cls_demo_b';
       const end = isoMinutesAgo(endedAgo);
       const start = isoMinutesAgo(endedAgo + 12);
       const created = isoMinutesAgo(endedAgo + 16);
       const winner = scoreA > scoreB ? a : b;
-      matchInsert.run(id, DEMO_EVENT_ID, classId, a, b, created, created, start, end, null, 'COMPLETED', scoreA, scoreB, winner, resultId, ownerId, created, end);
+      // Played matches did occupy a court, and the report's utilisation figures need that.
+      const court = `court_demo_${(index % 4) + 1}`;
+      matchInsert.run(id, DEMO_EVENT_ID, classId, a, b, created, created, start, end, court, 'COMPLETED', scoreA, scoreB, winner, resultId, ownerId, created, end);
       db.prepare(`INSERT INTO results (result_id, match_id, score_a, score_b, winner_id, entered_by, confirmed_by, status, entered_at, confirmed_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, ?, ?)`)
         .run(resultId, id, scoreA, scoreB, winner, ownerId, ownerId, end, end, end);
