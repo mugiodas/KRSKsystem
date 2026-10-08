@@ -40,7 +40,7 @@ export function createEngineRouter(db: DB, afterRun?: (eventId: string) => void)
     ensureEventAccess(db, req, eventId);
     requireEvent(db, eventId);
     const ctx = loadEngineContext(db, eventId);
-    const { candidates, blocked, blockedCounts, eligible } = evaluateCandidates(ctx, { maxPairs: 20 });
+    const { candidates, blocked, blockedCounts, eligible, reportLimit } = evaluateCandidates(ctx, { maxPairs: 20 });
     const isParticipant = req.auth?.role === 'PARTICIPANT';
     sendData(res, {
       ranAt: new Date(ctx.nowMs).toISOString(),
@@ -74,7 +74,8 @@ export function createEngineRouter(db: DB, afterRun?: (eventId: string) => void)
           played: player.played, restReady: player.restReady,
         }))
         : describeWaitingPlayers(ctx),
-      candidates: isParticipant ? [] : candidates,
+      evaluatedPairs: candidates.length,
+      candidates: isParticipant ? [] : candidates.slice(0, reportLimit),
       blocked: isParticipant ? [] : blocked,
       blockedCounts: isParticipant ? {} : blockedCounts,
       weights: {
@@ -119,23 +120,24 @@ export function createEngineRouter(db: DB, afterRun?: (eventId: string) => void)
     requireEvent(db, eventId);
     const ctx = loadEngineContext(db, eventId);
     const { candidates } = evaluateCandidates(ctx, { maxPairs: 60 });
+    const reported = candidates.slice(0, 60);
     const pair = asRows<{ match_id: string; player_a_id: string; player_b_id: string }>(db.prepare(`SELECT match_id, player_a_id, player_b_id
       FROM matches WHERE match_id = ? AND event_id = ?`).all(String(req.query.matchId ?? ''), eventId));
     if (!pair[0]) {
-      sendData(res, { candidates: candidates.slice(0, 10) });
+      sendData(res, { candidates: reported.slice(0, 10) });
       return;
     }
     const a = ctx.players.get(pair[0].player_a_id);
     const b = ctx.players.get(pair[0].player_b_id);
-    const match = candidates.find((candidate) => (candidate.playerAId === pair[0].player_a_id && candidate.playerBId === pair[0].player_b_id)
+    const match = reported.find((candidate) => (candidate.playerAId === pair[0].player_a_id && candidate.playerBId === pair[0].player_b_id)
       || (candidate.playerAId === pair[0].player_b_id && candidate.playerBId === pair[0].player_a_id));
     sendData(res, {
       matchId: pair[0].match_id,
       playerA: a ? { participantId: a.participantId, name: a.name, played: a.played, waitingMinutes: Number(a.waitingMinutes.toFixed(1)), rating: a.rating } : null,
       playerB: b ? { participantId: b.participantId, name: b.name, played: b.played, waitingMinutes: Number(b.waitingMinutes.toFixed(1)), rating: b.rating } : null,
       breakdown: match?.breakdown ?? null,
-      rank: match ? candidates.findIndex((candidate) => candidate === match) + 1 : null,
-      candidateCount: candidates.length,
+      rank: match ? reported.findIndex((candidate) => candidate === match) + 1 : null,
+      candidateCount: reported.length,
     });
   });
 

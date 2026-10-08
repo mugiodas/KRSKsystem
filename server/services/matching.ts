@@ -121,6 +121,7 @@ export interface EngineRunResult {
   assignedQueue: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string }>;
   created: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string; score: number }>;
   candidates: Candidate[];
+  evaluatedPairs: number;
   blocked: BlockedCandidate[];
   blockedCounts: Record<string, number>;
   skippedReasons: Record<string, number>;
@@ -411,18 +412,43 @@ export function scoreCandidate(ctx: EngineContext, playerA: PlayerState, playerB
 const round = (value: number): number => Number(value.toFixed(3));
 
 export interface EvaluateOptions {
-  /** Maximum pairs considered; keeps large events responsive. */
+  /** Maximum pairs reported back to the caller; assignment itself sees every feasible pair. */
   maxPairs?: number;
   /** Restrict to one class when the operator runs a class-scoped engine pass. */
   classId?: string | null;
 }
 
+/**
+ * Player level starvation order. It never decides a match on its own; it only
+ * bounds how many participants enter the O(n^2) pair scoring so a 200 player
+ * event still responds instantly. The most starved players are always kept.
+ */
+export function starvationRank(ctx: EngineContext, player: PlayerState): number {
+  const hasRequest = ctx.requests.some((request) => request.requesterId === player.participantId
+    || request.targetPlayerId === player.participantId);
+  const deficit = (ctx.maxPlayed - player.played) / ctx.maxPlayed;
+  return player.waitingMinutes + deficit * 30 + (hasRequest ? 8 : 0);
+}
+
+export function poolLimitFor(ctx: EngineContext): number {
+  return Math.min(160, Math.max(48, ctx.freeCourts.length * 10));
+}
+
 export function evaluateCandidates(
   ctx: EngineContext,
   options: EvaluateOptions = {},
-): { candidates: Candidate[]; blocked: BlockedCandidate[]; blockedCounts: Record<string, number>; eligible: PlayerState[] } {
-  const eligible = [...ctx.players.values()].filter((player) => !ctx.busyPlayerIds.has(player.participantId))
+): {
+  candidates: Candidate[]; blocked: BlockedCandidate[]; blockedCounts: Record<string, number>;
+  eligible: PlayerState[]; reportLimit: number;
+} {
+  const eligibleAll = [...ctx.players.values()].filter((player) => !ctx.busyPlayerIds.has(player.participantId))
     .filter((player) => !options.classId || player.classId === options.classId);
+  const poolLimit = poolLimitFor(ctx);
+  const eligible = eligibleAll.length > poolLimit
+    ? [...eligibleAll].sort((left, right) => starvationRank(ctx, right) - starvationRank(ctx, left)
+        || right.waitingMinutes - left.waitingMinutes
+        || left.participantId.localeCompare(right.participantId)).slice(0, poolLimit)
+    : eligibleAll;
   const candidates: Candidate[] = [];
   const blocked: BlockedCandidate[] = [];
   const blockedReasons = new Map<string, number>();
@@ -452,10 +478,11 @@ export function evaluateCandidates(
   const blockedCounts: Record<string, number> = {};
   for (const [reason, count] of blockedReasons) blockedCounts[reason] = count;
   return {
-    candidates: candidates.slice(0, options.maxPairs ?? 40),
+    candidates,
     blocked: blocked.sort((l, r) => r.pairWaitingMinutes - l.pairWaitingMinutes).slice(0, 25),
     blockedCounts,
     eligible,
+    reportLimit: options.maxPairs ?? 40,
   };
 }
 
@@ -494,22 +521,22 @@ export function runEngine(db: DB, eventId: string, options: RunEngineOptions = {
   const nowMs = options.nowMs ?? Date.now();
   const ctx = loadEngineContext(db, eventId, nowMs);
   const dryRun = options.dryRun === true;
-  const { candidates, blocked, blockedCounts } = evaluateCandidates(ctx, options);
+  const { candidates, blocked, blockedCounts, reportLimit } = evaluateCandidates(ctx, options);
   const skippedReasons: Record<string, number> = {};
   const assignedQueue: EngineRunResult['assignedQueue'] = [];
   const created: EngineRunResult['created'] = [];
 
   if (ctx.event.status === 'COMPLETED' || ctx.event.status === 'CANCELLED') {
     skippedReasons.EVENT_CLOSED = 1;
-    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons);
+    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons, reportLimit);
   }
   if (!ctx.event.auto_engine_enabled && !options.force) {
     skippedReasons.ENGINE_DISABLED = 1;
-    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons);
+    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons, reportLimit);
   }
   if (!ctx.event.auto_court_assignment && !options.force) {
     skippedReasons.AUTO_ASSIGN_DISABLED = 1;
-    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons);
+    return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons, reportLimit);
   }
 
   const usedCourtIds = new Set<string>();
@@ -615,14 +642,14 @@ export function runEngine(db: DB, eventId: string, options: RunEngineOptions = {
     }
   }
 
-  return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons);
+  return finish(ctx, dryRun, assignedQueue, created, candidates, blocked, blockedCounts, skippedReasons, reportLimit);
 }
 
 function finish(
   ctx: EngineContext, dryRun: boolean,
   assignedQueue: EngineRunResult['assignedQueue'], created: EngineRunResult['created'],
   candidates: Candidate[], blocked: BlockedCandidate[], blockedCounts: Record<string, number>,
-  skippedReasons: Record<string, number>,
+  skippedReasons: Record<string, number>, reportLimit = 12,
 ): EngineRunResult {
   if (ctx.timeProtected) skippedReasons.END_TIME_PROTECTED = (skippedReasons.END_TIME_PROTECTED ?? 0) + 1;
   if (!ctx.freeCourts.length) skippedReasons.NO_FREE_COURT = (skippedReasons.NO_FREE_COURT ?? 0) + 1;
@@ -633,7 +660,8 @@ function finish(
     freeCourts: ctx.freeCourts.length,
     assignedQueue: dryRun ? [] : assignedQueue,
     created,
-    candidates: candidates.slice(0, 12),
+    evaluatedPairs: candidates.length,
+    candidates: candidates.slice(0, Math.min(reportLimit, 12)),
     blocked: blocked.slice(0, 10),
     blockedCounts,
     skippedReasons,

@@ -187,6 +187,16 @@ function simulate(scenario: Scenario): SimResult {
   };
 }
 
+/**
+ * Waiting time cannot go below the rotation the court capacity allows:
+ * every tick puts 2 x courts players on court, and the rest rule costs one tick.
+ */
+function rotationBoundMinutes(scenario: Scenario): number {
+  const slotsPerTick = scenario.courts * 2;
+  const rotationTicks = Math.ceil(scenario.participants / slotsPerTick) + 1;
+  return rotationTicks * scenario.tickMinutes;
+}
+
 describe('Phase 3: stress and fairness (spec 43)', () => {
   const scenarios: Scenario[] = [
     { participants: 10, courts: 2, durationMinutes: 120, matchMinutes: 12, tickMinutes: 13 },
@@ -202,8 +212,11 @@ describe('Phase 3: stress and fairness (spec 43)', () => {
     expect(result.created).toBeGreaterThan(0);
     expect(result.minPlayed).toBeGreaterThanOrEqual(1);
     expect(result.maxPlayed - result.minPlayed).toBeLessThanOrEqual(2);
-    expect(result.maxWaitingMinutes).toBeLessThanOrEqual(45);
-    expect(result.courtUtilization).toBeGreaterThan(0.3);
+    expect(result.avgPlayed).toBeGreaterThan(1.5);
+    // Guards against wasting courts: waiting must stay near the capacity bound.
+    expect(result.maxWaitingMinutes).toBeLessThanOrEqual(rotationBoundMinutes(scenario));
+    expect(result.filledPasses).toBeGreaterThanOrEqual(result.passes * 0.9);
+    expect(result.courtUtilization).toBeGreaterThan(0.55);
     expect(result.slowestPassMs).toBeLessThan(1500);
   });
 
