@@ -11,6 +11,13 @@ interface Props {
   onSaved: () => void;
 }
 
+interface SheetState {
+  status: string | null;
+  enteredByMe: boolean;
+  scoreMine: number | null;
+  scoreOpponent: number | null;
+}
+
 /**
  * A participant may submit the score of their own match. It posts to the same
  * endpoint the operator uses, so there is exactly one source of truth — and
@@ -22,6 +29,8 @@ export function ResultSheet({ eventId, view, matchId, onClose, onSaved }: Props)
   const [theirs, setTheirs] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState('');
+  const [reported, setReported] = useState<SheetState>({ status: null, enteredByMe: false, scoreMine: null, scoreOpponent: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -29,6 +38,12 @@ export function ResultSheet({ eventId, view, matchId, onClose, onSaved }: Props)
       if (cancelled) return;
       setDetail(value);
       const mineIsA = value.playerAId === view.participant.participantId;
+      setReported({
+        status: value.result?.status ?? null,
+        enteredByMe: value.result?.enteredByParticipant === view.participant.participantId,
+        scoreMine: value.result ? Number(mineIsA ? value.result.scoreA : value.result.scoreB) : null,
+        scoreOpponent: value.result ? Number(mineIsA ? value.result.scoreB : value.result.scoreA) : null,
+      });
       const history = view.history.find((row) => row.matchId === matchId);
       setMine(history ? history.scoreMine : (mineIsA ? value.scoreA ?? 0 : value.scoreB ?? 0));
       setTheirs(history ? history.scoreOpponent : (mineIsA ? value.scoreB ?? 0 : value.scoreA ?? 0));
@@ -46,7 +61,7 @@ export function ResultSheet({ eventId, view, matchId, onClose, onSaved }: Props)
     setError(null);
     const mineIsA = detail.playerAId === view.participant.participantId;
     try {
-      await api.enterResult(eventId, matchId, mineIsA ? mine : theirs, mineIsA ? theirs : mine, detail.rowVersion);
+      await api.enterResult(eventId, matchId, mineIsA ? mine : theirs, mineIsA ? theirs : mine, detail.rowVersion, note || undefined);
       onSaved();
       onClose();
     } catch (caught) {
@@ -74,10 +89,30 @@ export function ResultSheet({ eventId, view, matchId, onClose, onSaved }: Props)
           <NumberField label={opponentName} value={theirs} onChange={setTheirs} />
         </div>
         {mine === theirs ? <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 6 }}>同点では送信できません。どちらかが勝っているスコアを入力してください。</div> : null}
+        {reported.status === 'ENTERED' && !reported.enteredByMe ? (
+          <div className="notice info" style={{ marginTop: 10 }}>
+            相手は <b className="num">{reported.scoreMine ?? 0}-{reported.scoreOpponent ?? 0}</b> と申告済みです。
+            同じスコアならそのまま送信すると即確定し、違えば運営の確認に切り替わります（試合はまだ順位に入っていません）。
+          </div>
+        ) : null}
+        {reported.status === 'ENTERED' && reported.enteredByMe ? (
+          <div className="notice info" style={{ marginTop: 10 }}>あなたの申告 <b className="num">{reported.scoreMine ?? 0}-{reported.scoreOpponent ?? 0}</b> は相手の確定待ちです。書き直すと上書きされます。</div>
+        ) : null}
+        <label className="field" style={{ marginTop: 10 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>運営へのメモ（任意）</span>
+          <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="例: 2ゲーム目です" maxLength={200}
+            style={{ height: 40, fontSize: 14, border: '1px solid var(--line-strong)', borderRadius: 8, padding: '0 10px', width: '100%' }} />
+        </label>
         <div className="m-sheet-actions">
           <button className="m-btn primary" disabled={busy || !detail || mine === theirs || (mine === 0 && theirs === 0)} onClick={submit}>
-            {busy ? '送信中…' : 'この内容で送信'}
+            {busy ? '送信中…' : reported.status === 'ENTERED' && !reported.enteredByMe && (mine !== reported.scoreMine || theirs !== reported.scoreOpponent)
+              ? '違うスコアを送信（運営へ）' : 'この内容で送信'}
           </button>
+          {reported.status === 'ENTERED' && !reported.enteredByMe ? (
+            <button className="m-btn" disabled={busy} onClick={() => { void api.rejectResult(eventId, matchId, note || null).then(() => { onSaved(); onClose(); }).catch(() => undefined); }}>
+              数字は送らずに不一致を伝える
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

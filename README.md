@@ -17,8 +17,8 @@
 
 | 画面 | 路径 | 内容 |
 | --- | --- | --- |
-| 運営ダッシュボード | `/events/:eventId` | ALERT → COURT LIVE → MATCH QUEUE → PARTICIPANT STATUS の4ブロック。リーグ生成プレビュー、トーナメント表（モードC）、エンジン手動実行と説明、結果入力、手動上書き、設定、操作ログ、対戦希望、お知らせ配信、大会レポート |
-| 選手スマホ | `/m` | PC画面の縮約ではなく「次の1試合」を主役にした別設計。つぎの試合 / 対戦希望 / 本日 / 連絡 のタブ、結果入力の共有 |
+| 運営ダッシュボード | `/events/:eventId` | ALERT → COURT LIVE → MATCH QUEUE → PARTICIPANT STATUS の4ブロック。リーグ生成プレビュー、トーナメント表（モードC）、エンジン手動実行と説明、結果入力、選手の申告の上書き・確定、設定、操作ログ、対戦希望、お知らせ配信、大会レポート |
+| 選手スマホ | `/m` | PC画面の縮約ではなく「次の1試合」を主役にした別設計。つぎの試合 / 対戦希望 / 本日 / 連絡 のタブ、結果申告と**相手からの申告の確定**（相互確認） |
 | 大会レポート | ダッシュボード内タブ | 印刷前提の1枚もの。SVG不要・CSV同梱（下記） |
 
 ## マッチングエンジン（心臓部）
@@ -56,6 +56,37 @@ MatchScore = RequestPriority + WaitingScore + MatchCountBalance + UnplayedBonus
   `POST /api/events/:eventId/tournament/generate`・`POST /api/events/:eventId/tournament/:bracketId/rebalance`・
   `DELETE /api/events/:eventId/tournament/:bracketId`
 
+## 結果の相互確認（ENTERED → CONFIRMED）
+
+選手がスコアを入力しただけでは確定扱いにしません。もう一方の選手（または運営）が確認して
+初めて順位・ドロー・レポートに反映されます。`server/services/results.ts` が状態機を担い、
+`results.status` が単一の真実です。
+
+```
+ENTERED    どちらかが申告した。相手か運営の確定待ち（試合は RESULT_PENDING、コートは稼働中のまま）
+DISPUTED   両者の申告が食い違った。運営だけが確定できる
+CONFIRMED  一致・運営入力・期限切れ自動確定のいずれかで確定 → matches = COMPLETED
+CORRECTED  確定後に運営が書き換えた（上書きと同時に確定）
+```
+
+- 一致判定はスコア2点のみ（同点なら別申告）。一致そのものが相互確認なので、運営の操作は不要です
+- `POST /api/events/:eventId/matches/:matchId/result` は常に **201** を返し、`resultStatus` / `confirmed` /
+  `bracketAdvance` を添えます。確定時のみ `completeMatch` が走り、コート解放・対戦希望の MATCHED・
+  トーナメントの次カード作成が同じトランザクションで連動します
+- 自分で自分の申告は確定できません（`409 SELF_CONFIRM`）。対戦相手以外も `403 FORBIDDEN`、
+  確定済みの書き直し要求は `409 RESULT_ALREADY_CONFIRMED`、不一致の自己解決は `409 DISPUTE_REQUIRES_STAFF`
+- `events.result_confirm_timeout_minutes`（既定3分、0で即時確定＝従来の運営単独運用）で自動確定までを管理。
+  経過分はエンジン起動前と30秒周期のスイープで吸収し、`POST /api/events/:eventId/results/sweep` で手動実行もできます
+- 大会終了後（終了時刻経過・終了/取消）は放置せず、申告不一致も先頭の申告で自動確定して記録を閉じます
+- 並行入力は `matches.row_version` で守ります（後の1件は `409 VERSION_CONFLICT`）
+- 運営側 UI: COURT LIVE のカードに「相手の確定待ち」「申告不一致」の表示と申告スコア、
+  「確定」/「上書き・確定」ボタン。結果入力モーダルは選手申告と同一値なら送信即確定、
+  違いがあれば不一致になった旨を明示。設定モーダルに自動確定の分数入力
+- 選手側 UI: 次の1試合カードに相手の申告内容と「この内容で確定」「スコアが違う」（自分の申告を送信 → 運営確認へ）、
+  不一致中は運営対応の案内のみ。入力シートは相手申告との一致/不一致でボタン文言が変わり、メモ（任意）を添えられます
+- アラート: 申告があって未確定のまま期限を過ぎたカードは IMPORTANT / URGENT（不一致は URGENT）で「結果が確定されていません」。
+  申告自体がゼロの RESULT_PENDING は従来どおり「結果未入力」
+
 ## 大会レポート（Phase 6）
 
 `GET /api/events/:eventId/report` が保存済みの行だけを集計して返します（推定値は混ぜません）。
@@ -70,11 +101,13 @@ MatchScore = RequestPriority + WaitingScore + MatchCountBalance + UnplayedBonus
 | fairness | 試合数の標準偏差、バランススコア（0〜1にクランプ）、最多/最少出場 |
 | automation | 自動採番と手動作成の内訳、自動比率 |
 | noShows | 件数・影響を受けた選手数・比率 |
+| confirmations | 確定済み / 選手の申告数 / 自動確定数 / 確定待ち・不一致 / 運営上書き / 申告から確定までの平均分 / 確定率 |
 | tournament | ドロー数・作成/消化カード・不戦勝数・クラス別状況・総合優勝（モードC以外は 0 埋め） |
 | integrity | 後述の整合性チェック結果を常時同梱 |
 | rows / standings | 選手別1行（試合・勝負・得点・待機・希望・欠場）とクラス別上位10名 |
 
-- `GET /api/events/:eventId/report.csv` — BOM付き・CRLF。表計算ソフトでそのまま開けます（OWNER / ADMIN / VIEWERのみ）
+- `GET /api/events/:eventId/report.csv` — BOM付き・CRLF。表計算ソフトでそのまま開けます（OWNER / ADMIN / VIEWERのみ）。
+  「結果の確定」「確定待ち」の2行を含みます
 - 待機時間は「前の試合が終わってから、**実際に始まった**次の試合まで」。これから始まる予定試合までの時間は含みません（そちらはライブ画面側の数字です）
 
 ## データ整合性チェック
@@ -87,11 +120,12 @@ npm run integrity                       # CLI。CRITICAL があれば exit code 
 npm run integrity -- --event evt_demo_krsk --json
 ```
 
-検査項目（18）: 選手の二重予約 / コートの二重予約 / 同一カードの重複 / 存在しないレコードへの参照 /
+検査項目（20）: 選手の二重予約 / コートの二重予約 / 同一カードの重複 / 存在しないレコードへの参照 /
 スコアが不正な完了試合 / 勝者とスコアの不一致 / 試合のない結果記録 / 結果がないまま完了 /
 終了が開始より古い / 不正な対戦希望 / 希望が別カードと接続 / コート状態の食い違い /
 勝者がカードに不在 / 未終了カードにスコア / トーナメント枠の重複 / トーナメントの次カード未作成 /
-決勝終了後も開いたドロー / ドローの勝者が参加者一覧に不在。
+決勝終了後も開いたドロー / ドローの勝者が参加者一覧に不在 /
+結果が確定されないまま経過（WARNING） / 選手の申告不一致（WARNING）。
 
 加えて DB 側に UNIQUE 制約（同一大会内の同名選手、開いているカードの pair_key）と
 CHECK 制約（スコア範囲・同点不可・状態遷移の語彙）を置き、アプリ側の検証をすり抜けた
@@ -143,5 +177,4 @@ scripts/           reset-demo.mjs（デモDBのリセット）
 ## 已知の割り切り
 
 - トーナメント表は単敗淘汰のみ（3位決定戦・ダブルス・クラス横断ドロー・シードの手動並べ替えは未対応）
-- 選手自身の結果入力は即座に COMPLETED になります（ENTERED → 確認 の2段運用はしていません）
 - 体育館掲示用（大型スクリーン専用ビュー）はありません。印刷用レポートとCSVで代替します

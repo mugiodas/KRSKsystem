@@ -5,7 +5,8 @@ export type ViolationCode =
   | 'PARTICIPANT_DOUBLE_BOOKED' | 'COURT_DOUBLE_BOOKED' | 'DUPLICATE_OPEN_PAIR' | 'ORPHAN_REFERENCE'
   | 'INVALID_COMPLETED_SCORE' | 'RESULT_MISMATCH' | 'ORPHAN_RESULT' | 'COMPLETED_WITHOUT_RESULT'
   | 'END_BEFORE_START' | 'INVALID_REQUEST' | 'REQUEST_MATCHED_TO_NON_MATCH' | 'COURT_STATE_STALE' | 'WINNER_NOT_IN_MATCH' | 'SCORE_ON_OPEN_MATCH'
-  | 'BRACKET_SLOT_DUPLICATE' | 'BRACKET_ADVANCE_MISSED' | 'BRACKET_FINAL_UNCLOSED' | 'BRACKET_SEED_UNKNOWN';
+  | 'BRACKET_SLOT_DUPLICATE' | 'BRACKET_ADVANCE_MISSED' | 'BRACKET_FINAL_UNCLOSED' | 'BRACKET_SEED_UNKNOWN'
+  | 'RESULT_UNCONFIRMED' | 'RESULT_DISPUTED';
 
 /** Japanese labels shared by the QA endpoint, the CLI and the report sheet. */
 export const VIOLATION_LABELS: Record<ViolationCode, string> = {
@@ -27,6 +28,8 @@ export const VIOLATION_LABELS: Record<ViolationCode, string> = {
   BRACKET_ADVANCE_MISSED: 'トーナメントの次ラウンド未作成',
   BRACKET_FINAL_UNCLOSED: '決勝済みなのに未閉じのトーナメント',
   BRACKET_SEED_UNKNOWN: 'シード外の選手が組まれたトーナメント対戦',
+  RESULT_UNCONFIRMED: '結果が確定されないまま経過',
+  RESULT_DISPUTED: '選手の申告不一致',
 };
 
 export interface IntegrityViolation {
@@ -122,9 +125,23 @@ export function runIntegrityChecks(db: DB, eventId: string): IntegrityReport {
     WHERE m.event_id = ? AND (r.score_a <> m.score_a OR r.score_b <> m.score_b OR r.winner_id <> m.winner_id)`, eventId);
 
   // 7) A result without a completed match, or a completed match without a result.
+  //    A player's report waiting to be confirmed (ENTERED / DISPUTED on a match still
+  //    in PLAYING or RESULT_PENDING) is the designed two-step state, not an orphan.
   check('ORPHAN_RESULT', 'CRITICAL', `
     SELECT COUNT(*) AS count, r.result_id AS sample FROM results r JOIN matches m ON m.match_id = r.match_id
-    WHERE m.event_id = ? AND m.status <> 'COMPLETED'`, eventId);
+    WHERE m.event_id = ? AND m.status <> 'COMPLETED'
+      AND NOT (m.status IN ('PLAYING','RESULT_PENDING') AND r.status IN ('ENTERED','DISPUTED'))`, eventId);
+
+  // 7b) Confirmation left to rot: a report nobody confirmed past the event's timeout,
+  //     and a pair of claims the operator has not resolved yet.
+  check('RESULT_UNCONFIRMED', 'WARNING', `
+    SELECT COUNT(*) AS count, r.result_id AS sample FROM results r
+    JOIN matches m ON m.match_id = r.match_id JOIN events e ON e.event_id = m.event_id
+    WHERE m.event_id = ? AND r.status = 'ENTERED' AND m.status <> 'COMPLETED'
+      AND datetime(r.entered_at) <= datetime('now', '-' || e.result_confirm_timeout_minutes || ' minutes')`, eventId);
+  check('RESULT_DISPUTED', 'WARNING', `
+    SELECT COUNT(*) AS count, r.result_id AS sample FROM results r JOIN matches m ON m.match_id = r.match_id
+    WHERE m.event_id = ? AND r.status = 'DISPUTED'`, eventId);
   check('COMPLETED_WITHOUT_RESULT', 'WARNING', `
     SELECT COUNT(*) AS count, m.match_id AS sample FROM matches m
     WHERE m.event_id = ? AND m.status = 'COMPLETED' AND NOT EXISTS (
@@ -204,7 +221,7 @@ export function runIntegrityChecks(db: DB, eventId: string): IntegrityReport {
   return {
     eventId,
     checkedAt: new Date().toISOString(),
-    checks: 18,
+    checks: 20,
     violations,
     clean: violations.every((item) => item.severity !== 'CRITICAL'),
   };

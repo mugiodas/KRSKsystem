@@ -6,7 +6,8 @@ import { requireRole, type AuthedRequest } from '../auth.js';
 import { ApiError, sendData } from '../http.js';
 import { audit, ensureEventAccess, requireEvent } from './core.js';
 import { buildLeaguePreview } from '../services/league.js';
-import { advanceBracket, assertBracketTerminable, retargetBracket } from '../services/tournament.js';
+import { assertBracketTerminable, retargetBracket } from '../services/tournament.js';
+import { confirmEnteredResult, confirmStaleResults, disputeResult, submitResult, type ResultActor } from '../services/results.js';
 import { calculateRankings } from '../services/ranking.js';
 
 const activeStatuses = ['CALLED', 'COURT_ASSIGNED', 'PLAYING', 'RESULT_PENDING'];
@@ -17,22 +18,36 @@ function param(req: AuthedRequest, key: string): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
+  const resultColumns = `res.status AS result_status, res.result_id AS result_row_id,
+    res.entered_at AS result_entered_at, res.confirmed_at AS result_confirmed_at,
+    res.entered_by_participant AS result_entered_by_participant, res.auto_confirmed AS result_auto_confirmed,
+    res.score_a AS reported_score_a, res.score_b AS reported_score_b, res.dispute AS result_dispute`;
+
+/** A pending report travels with the card, so every screen can say what is missing. */
+function attachResultShape(row: Record<string, any>): Record<string, any> {
+  if (row.result_dispute) {
+    try { row.result_dispute = JSON.parse(String(row.result_dispute)); } catch { /* leave as text */ }
+  }
+  return row;
+}
+
 function getMatch(db: DB, matchId: string, eventId?: string): Record<string, any> {
   const row = asRow<Record<string, any>>(db.prepare(`SELECT m.*,
     pa.name AS player_a_name, pa.club AS player_a_club, pb.name AS player_b_name, pb.club AS player_b_club,
-    c.court_name, c.court_number, cl.class_name
+    c.court_name, c.court_number, cl.class_name, ${resultColumns}
     FROM matches m
     JOIN participants pa ON pa.participant_id = m.player_a_id
     JOIN participants pb ON pb.participant_id = m.player_b_id
     LEFT JOIN courts c ON c.court_id = m.court_id
     LEFT JOIN classes cl ON cl.class_id = m.class_id
+    LEFT JOIN results res ON res.match_id = m.match_id
     WHERE m.match_id = ? AND (? IS NULL OR m.event_id = ?)`)
     .get(matchId, eventId ?? null, eventId ?? null));
   if (!row) throw new ApiError(404, 'MATCH_NOT_FOUND', '試合が見つかりません。');
   if (row.score_breakdown) {
     try { row.score_breakdown = JSON.parse(String(row.score_breakdown)); } catch { /* keep raw audit data */ }
   }
-  return row;
+  return attachResultShape(row);
 }
 
 function ensureMatchAccess(req: AuthedRequest, match: Record<string, any>): void {
@@ -90,6 +105,15 @@ function assertAssignmentConstraints(db: DB, event: Record<string, unknown>, mat
   assertEndTime(event, nowIso());
 }
 
+/** Who is acting: staff confirm by themselves, a player is bound to their own card. */
+function describeActor(req: AuthedRequest): ResultActor {
+  return {
+    userId: req.auth?.userId ?? null,
+    participantId: req.auth?.role === 'PARTICIPANT' ? (req.auth.participantId ?? null) : null,
+    staff: req.auth?.role !== 'PARTICIPANT',
+  };
+}
+
 function parseScore(input: { scoreA: number; scoreB: number }, match: Record<string, any>): { winnerId: string } {
   if (input.scoreA === input.scoreB) throw new ApiError(400, 'TIED_SCORE', '同点の結果は登録できません。');
   return { winnerId: input.scoreA > input.scoreB ? match.player_a_id : match.player_b_id };
@@ -106,10 +130,11 @@ export function readMatches(db: DB, eventId: string, options: {
   const limit = Math.min(500, Math.max(1, options.limit ?? 200));
   const rows = asRows<Record<string, any>>(db.prepare(`SELECT m.*,
     pa.name AS player_a_name, pb.name AS player_b_name, pa.club AS player_a_club, pb.club AS player_b_club,
-    c.court_name, c.court_number, cl.class_name
+    c.court_name, c.court_number, cl.class_name, ${resultColumns}
     FROM matches m JOIN participants pa ON pa.participant_id = m.player_a_id
     JOIN participants pb ON pb.participant_id = m.player_b_id
     LEFT JOIN courts c ON c.court_id = m.court_id LEFT JOIN classes cl ON cl.class_id = m.class_id
+    LEFT JOIN results res ON res.match_id = m.match_id
     WHERE m.event_id = ? AND (? IS NULL OR m.status = ?) AND (? IS NULL OR m.phase = ?)
     AND (? IS NULL OR ? IN (m.player_a_id, m.player_b_id))
     ORDER BY CASE m.status WHEN 'PLAYING' THEN 1 WHEN 'RESULT_PENDING' THEN 2 WHEN 'COURT_ASSIGNED' THEN 3 WHEN 'CALLED' THEN 4 WHEN 'WAITING' THEN 5 ELSE 6 END,
@@ -120,6 +145,7 @@ export function readMatches(db: DB, eventId: string, options: {
     if (row.score_breakdown) {
       try { row.score_breakdown = JSON.parse(row.score_breakdown); } catch { /* no-op */ }
     }
+    attachResultShape(row);
   });
   return rows;
 }
@@ -174,7 +200,7 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     const match = getMatch(db, param(req, 'matchId'), param(req, 'eventId'));
     ensureMatchAccess(req, match);
     const result = db.prepare('SELECT * FROM results WHERE match_id = ?').get(match.match_id);
-    sendData(res, { ...match, result: result ?? null });
+    sendData(res, { ...match, result: result ? attachResultShape({ ...result }) : null });
   });
 
   router.post('/events/:eventId/matches', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
@@ -303,39 +329,29 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     ensureEventAccess(db, req, eventId);
     const match = getMatch(db, param(req, 'matchId'), eventId);
     ensureMatchAccess(req, match);
-    if (!['PLAYING', 'RESULT_PENDING'].includes(match.status)) throw new ApiError(409, 'INVALID_STATE_TRANSITION', 'プレー中または結果待ちの試合のみ結果登録できます。');
-    const input = z.object({ scoreA: z.number().int().min(0).max(99), scoreB: z.number().int().min(0).max(99), rowVersion: z.number().int().positive() }).parse(req.body);
-    const { winnerId } = parseScore(input, match);
-    const resultId = makeId('result');
-    const now = nowIso();
-    // Assigned inside the transaction callback, so it travels in a holder object.
-    const bracketNotice: { current: { created: Array<{ matchId: string; round: number; roundLabel: string; playerAName: string; playerBName: string }>; bracketCompleted: boolean; phaseChanged: boolean } | null } = { current: null };
-    transaction(db, () => {
-      const updated = db.prepare(`UPDATE matches SET status = 'COMPLETED', score_a = ?, score_b = ?, winner_id = ?, result_id = ?,
-        end_time = COALESCE(end_time, ?), updated_at = ?, row_version = row_version + 1 WHERE match_id = ? AND row_version = ?`)
-        .run(input.scoreA, input.scoreB, winnerId, resultId, now, now, match.match_id, input.rowVersion);
-      if (Number(updated.changes) === 0) throw new ApiError(409, 'VERSION_CONFLICT', '他の端末で結果が登録されました。');
-      db.prepare(`INSERT INTO results (result_id, match_id, score_a, score_b, winner_id, entered_by, status, entered_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'ENTERED', ?, ?)`)
-        .run(resultId, match.match_id, input.scoreA, input.scoreB, winnerId, req.auth?.userId ?? '', now, now);
-      releaseCourt(db, match.court_id, now);
-      db.prepare(`UPDATE match_requests SET status = 'MATCHED', matched_match_id = ?, updated_at = ?, row_version = row_version + 1
-        WHERE event_id = ? AND status = 'ACTIVE' AND ((requester_id = ? AND target_player_id = ?) OR (requester_id = ? AND target_player_id = ?))`)
-        .run(match.match_id, now, eventId, match.player_a_id, match.player_b_id, match.player_b_id, match.player_a_id);
-      // A bracket card advances in the same transaction, so the next round can never
-      // be left half-open by a crash between two statements.
-      const advanced = advanceBracket(db, eventId, match.match_id, req.auth?.userId ?? null);
-      if (advanced.created.length > 0 || advanced.bracketCompleted) bracketNotice.current = advanced;
-    });
-    const completed = getMatch(db, match.match_id);
-    audit(db, req, eventId, 'RESULT', resultId, 'ENTER', undefined, {
-      scoreA: input.scoreA, scoreB: input.scoreB, winnerId,
-      bracket: bracketNotice.current ? {
-        created: bracketNotice.current.created, completed: bracketNotice.current.bracketCompleted, phaseChanged: bracketNotice.current.phaseChanged,
+    const input = z.object({
+      scoreA: z.number().int().min(0).max(99), scoreB: z.number().int().min(0).max(99),
+      rowVersion: z.number().int().positive(), note: z.string().trim().max(200).nullish(),
+    }).parse(req.body);
+    const actor = describeActor(req);
+    const outcome = submitResult(db, eventId, match.match_id, input, actor);
+    const after = getMatch(db, match.match_id);
+    audit(db, req, eventId, 'RESULT', outcome.resultId, outcome.state === 'ENTERED' ? 'SUBMIT' : outcome.state === 'DISPUTED' ? 'DISPUTE' : 'ENTER', {
+      scoreA: input.scoreA, scoreB: input.scoreB,
+    }, {
+      state: outcome.state, winnerId: outcome.winnerId, autoConfirmed: outcome.autoConfirmed, waitingFor: outcome.waitingFor,
+      bracket: outcome.bracketAdvance ? {
+        created: outcome.bracketAdvance.created, completed: outcome.bracketAdvance.bracketCompleted, phaseChanged: outcome.bracketAdvance.phaseChanged,
       } : undefined,
     });
-    sendData(res, { ...completed, bracketAdvance: bracketNotice.current }, 201);
-    if (afterCompletion) queueMicrotask(() => afterCompletion(eventId));
+    sendData(res, {
+      ...after, resultStatus: outcome.state, confirmed: outcome.state === 'CONFIRMED',
+      bracketAdvance: outcome.bracketAdvance,
+    }, 201);
+    // Only a confirmed result frees a court and moves the draw, so the engine is
+    // woken up on that path (and on the auto-confirm of a timeout, which the
+    // caller cannot know about from the response alone).
+    if (outcome.state === 'CONFIRMED' && afterCompletion) queueMicrotask(() => afterCompletion(eventId));
   });
 
   router.patch('/events/:eventId/matches/:matchId/result', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
@@ -344,6 +360,17 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     const result = asRow<Record<string, any>>(db.prepare('SELECT * FROM results WHERE match_id = ?').get(match.match_id));
     if (!result) throw new ApiError(404, 'RESULT_NOT_FOUND', '結果が見つかりません。');
     const input = z.object({ scoreA: z.number().int().min(0).max(99), scoreB: z.number().int().min(0).max(99), rowVersion: z.number().int().positive() }).parse(req.body);
+    // A result the players have not settled yet is decided by staff: rewriting it
+    // confirms it, which is the resolution path for a disputed pair of claims.
+    if (match.status !== 'COMPLETED') {
+      const outcome = submitResult(db, eventId, match.match_id, input, describeActor(req));
+      audit(db, req, eventId, 'RESULT', outcome.resultId, 'CORRECT', result, {
+        scoreA: input.scoreA, scoreB: input.scoreB, winnerId: outcome.winnerId, resolved: true,
+      });
+      sendData(res, { ...getMatch(db, match.match_id), resultStatus: outcome.state, bracketAdvance: outcome.bracketAdvance });
+      if (afterCompletion) queueMicrotask(() => afterCompletion(eventId));
+      return;
+    }
     const { winnerId } = parseScore(input, match);
     const now = nowIso();
     transaction(db, () => {
@@ -360,16 +387,42 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     sendData(res, db.prepare('SELECT * FROM results WHERE result_id = ?').get(result.result_id));
   });
 
-  router.post('/events/:eventId/matches/:matchId/result/confirm', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
-    const match = getMatch(db, param(req, 'matchId'), param(req, 'eventId'));
-    const input = z.object({ rowVersion: z.number().int().positive() }).parse(req.body);
-    const now = nowIso();
-    const changed = db.prepare(`UPDATE results SET status = 'CONFIRMED', confirmed_by = ?, confirmed_at = ?, updated_at = ?, row_version = row_version + 1
-      WHERE match_id = ? AND row_version = ?`).run(req.auth?.userId ?? null, now, now, match.match_id, input.rowVersion);
-    if (Number(changed.changes) === 0) throw new ApiError(409, 'VERSION_CONFLICT', '他の端末で結果が更新されました。');
-    const result = db.prepare('SELECT * FROM results WHERE match_id = ?').get(match.match_id);
-    audit(db, req, match.event_id, 'RESULT', String((result as any).result_id), 'CONFIRM', undefined, result);
-    sendData(res, result);
+  router.post('/events/:eventId/matches/:matchId/result/confirm', (req: AuthedRequest, res: Response) => {
+    const eventId = param(req, 'eventId');
+    ensureEventAccess(db, req, eventId);
+    const match = getMatch(db, param(req, 'matchId'), eventId);
+    ensureMatchAccess(req, match);
+    const input = z.object({ rowVersion: z.number().int().positive().optional() }).parse(req.body ?? {});
+    const confirmed = confirmEnteredResult(db, eventId, match.match_id, describeActor(req));
+    const after = getMatch(db, match.match_id);
+    audit(db, req, eventId, 'RESULT', confirmed.resultId, 'CONFIRM', { rowVersion: input.rowVersion ?? null }, {
+      matchId: match.match_id, winnerId: after.winner_id,
+      bracket: confirmed.bracketAdvance ? { created: confirmed.bracketAdvance.created, completed: confirmed.bracketAdvance.bracketCompleted } : undefined,
+    });
+    sendData(res, { ...after, resultStatus: 'CONFIRMED', bracketAdvance: confirmed.bracketAdvance });
+    if (afterCompletion) queueMicrotask(() => afterCompletion(eventId));
+  });
+
+  router.post('/events/:eventId/matches/:matchId/result/reject', (req: AuthedRequest, res: Response) => {
+    const eventId = param(req, 'eventId');
+    ensureEventAccess(db, req, eventId);
+    const match = getMatch(db, param(req, 'matchId'), eventId);
+    ensureMatchAccess(req, match);
+    const input = z.object({ note: z.string().trim().min(1).max(200).nullish() }).parse(req.body ?? {});
+    const rejected = disputeResult(db, eventId, match.match_id, describeActor(req), input.note ?? null);
+    audit(db, req, eventId, 'RESULT', rejected.resultId, 'REJECT', undefined, { claim: rejected.claim });
+    sendData(res, { ...getMatch(db, match.match_id), resultStatus: 'DISPUTED', claim: rejected.claim });
+  });
+
+  router.post('/events/:eventId/results/sweep', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
+    const eventId = param(req, 'eventId');
+    ensureEventAccess(db, req, eventId);
+    const swept = confirmStaleResults(db, eventId);
+    if (swept.confirmed + swept.disputed > 0) {
+      audit(db, req, eventId, 'RESULT', eventId, 'AUTO_CONFIRM', undefined, swept);
+      if (afterCompletion) queueMicrotask(() => afterCompletion(eventId));
+    }
+    sendData(res, swept);
   });
 
   router.get('/events/:eventId/rankings', (req: AuthedRequest, res: Response) => {

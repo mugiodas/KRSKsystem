@@ -65,7 +65,7 @@ describe('Phase 4: dashboard against the live API', () => {
 
     const courtsHtml = renderToStaticMarkup(createElement(CourtLive, {
       courts: courts as never, matches: live as never, nowMs, canOperate: true, matchMinutes: 19,
-      onStart: () => undefined, onFinish: () => undefined, onResult: () => undefined, onCall: () => undefined, onManualAssign: () => undefined,
+      onStart: () => undefined, onFinish: () => undefined, onResult: () => undefined, onCall: () => undefined, onManualAssign: () => undefined, onConfirm: () => undefined,
     }));
     const queueHtml = renderToStaticMarkup(createElement(MatchQueue, {
       matches: live as never, requests: requests as never, nowMs, canOperate: true,
@@ -104,7 +104,7 @@ describe('Phase 4: dashboard against the live API', () => {
     expect(data.participant.name).toBe('古谷 莉歩');
     expect(view.data.participantId).toBe(data.participant.participantId);
 
-    const hero = renderToStaticMarkup(createElement(NextMatchCard, { view: data, nowMs: Date.now(), onEnterResult: () => undefined }));
+    const hero = renderToStaticMarkup(createElement(NextMatchCard, { view: data, nowMs: Date.now(), onEnterResult: () => undefined, onConfirmResult: () => undefined, onDisputeResult: () => undefined }));
     const history = renderToStaticMarkup(createElement(HistoryTab, { view: data }));
     const info = renderToStaticMarkup(createElement(InfoTab, { view: data }));
     const html = `${hero}${history}${info}`;

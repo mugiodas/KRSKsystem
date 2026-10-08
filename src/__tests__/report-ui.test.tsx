@@ -33,7 +33,9 @@ const report = {
   fairness: { playedStdDev: 1.4, balanceScore: 0.46, mostPlayed: '古谷 莉歩（7試合）', leastPlayed: '森 悠人（2試合）' },
   automation: { autoEngine: true, autoCourt: true, createdAuto: 8, createdManual: 1, autoShare: 0.89 },
   noShows: { count: 1, affectedPlayers: 2, rate: 0.11 },
-  integrity: { eventId: 'evt_1', checkedAt: '2026-04-11T09:00:00.000Z', checks: 18, violations: [], clean: true },
+  confirmations: { total: 8, confirmed: 6, corrected: 1, entered: 1, disputed: 0, autoConfirmed: 2,
+    byPlayers: 5, pendingMatches: 1, avgConfirmMinutes: 1.8, confirmRate: 0.875 },
+  integrity: { eventId: 'evt_1', checkedAt: '2026-04-11T09:00:00.000Z', checks: 20, violations: [], clean: true },
   tournament: {
     brackets: 2, open: 1, completed: 1, cards: 9, decided: 7, walkovers: 3,
     byClass: [
@@ -74,7 +76,7 @@ describe('大会レポート画面', () => {
       const url = String(input);
       if (url.endsWith('/integrity')) {
         return Promise.resolve(jsonResponse({
-          data: { eventId: 'evt_1', checkedAt: '2026-04-11T09:05:00.000Z', checks: 18, clean: false, violations: [{ code: 'COURT_DOUBLE_BOOKED', severity: 'CRITICAL', count: 2, sample: 'ct1' }] },
+          data: { eventId: 'evt_1', checkedAt: '2026-04-11T09:05:00.000Z', checks: 20, clean: false, violations: [{ code: 'COURT_DOUBLE_BOOKED', severity: 'CRITICAL', count: 2, sample: 'ct1' }] },
         }));
       }
       return Promise.resolve(jsonResponse({ data: report }));
@@ -112,7 +114,12 @@ describe('大会レポート画面', () => {
     expect(text).toContain('総合優勝：古谷 莉歩');
     expect(text).toContain('進行中');
     // The report already carries the integrity verdict from generation time.
-    expect(text).toContain('18項目すべて合格');
+    expect(text).toContain('20項目すべて合格');
+    // Two-step confirmation: the sheet has to show what is still unsettled.
+    expect(text).toContain('結果の確定');
+    expect(text).toContain('88%');
+    expect(text).toContain('7/8件');
+    expect(text).toContain('1.8分');
   });
 
   it('highlights the players the operators should act on', async () => {

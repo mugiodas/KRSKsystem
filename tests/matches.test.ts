@@ -116,7 +116,7 @@ describe('Phase 2: match, result and ranking', () => {
     expect(matchRow.winner_id).toBe(queued.playerBId);
   });
 
-  it('corrects and confirms a result, then recalculates ranking tie-breakers', async () => {
+  it('corrects a result and refuses to re-confirm what is already settled', async () => {
     const match = (db.prepare("SELECT match_id FROM matches WHERE event_id = ? AND status = 'COMPLETED' ORDER BY created_at LIMIT 1").get(eventId) as any);
     const detail = await agent.get(`/api/events/${eventId}/matches/${match.match_id}`).expect(200);
     const corrected = await agent.patch(`/api/events/${eventId}/matches/${match.match_id}/result`).send({
@@ -124,10 +124,11 @@ describe('Phase 2: match, result and ranking', () => {
     }).expect(200);
     expect(corrected.body.data.status).toBe('CORRECTED');
     expect(corrected.body.data.winnerId).toBe(detail.body.data.playerBId);
+    // A correction is already an authoritative record, so the confirm switch declines.
     const confirmed = await agent.post(`/api/events/${eventId}/matches/${match.match_id}/result/confirm`).send({
       rowVersion: corrected.body.data.rowVersion,
-    }).expect(200);
-    expect(confirmed.body.data.status).toBe('CONFIRMED');
+    }).expect(409);
+    expect(confirmed.body.error.code).toBe('ALREADY_CONFIRMED');
 
     const rankings = await agent.get(`/api/events/${eventId}/rankings?classId=${classId}`).expect(200);
     expect(rankings.body.data).toHaveLength(5);

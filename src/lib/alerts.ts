@@ -6,7 +6,8 @@ export type AlertSeverity = 'URGENT' | 'IMPORTANT' | 'INFO';
 export interface DashboardAlert {
   id: string;
   severity: AlertSeverity;
-  kind: 'MISSING_RESULT' | 'LONG_WAIT' | 'IDLE_COURT' | 'DELAY' | 'NO_SHOW' | 'UNDER_MATCHED' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
+  kind: 'MISSING_RESULT' | 'RESULT_UNCONFIRMED' | 'RESULT_DISPUTED' | 'LONG_WAIT' | 'IDLE_COURT' | 'DELAY'
+    | 'NO_SHOW' | 'UNDER_MATCHED' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
   title: string;
   detail: string;
   /** Deep link target so the operator can act from the alert itself. */
@@ -35,28 +36,62 @@ export function buildAlerts(input: {
   const alerts: DashboardAlert[] = [];
   const resultGrace = Number(event.resultInputGraceMinutes ?? 3);
 
-  // 1) A finished match still waiting for a score keeps the court locked.
+  const confirmTimeout = Number(event.resultConfirmTimeoutMinutes ?? 3);
+
+  // 1) A finished match keeps its court locked until the score is settled. What is
+  //    missing differs: nobody has reported, one side reported and the other has not
+  //    tapped yet, or the two reports disagree.
+  const pendingAlerts: DashboardAlert[] = [];
   matches
     .filter((match) => match.status === 'RESULT_PENDING')
     .map((match) => {
-      const since = parseIso(match.endTime ?? match.updatedAt);
+      const since = parseIso(match.resultEnteredAt ?? match.endTime ?? match.updatedAt);
       const waited = since === null ? 0 : minutesBetween(since, nowMs);
       return { match, waited };
     })
-    .filter((item) => item.waited > resultGrace)
     .sort((left, right) => right.waited - left.waited)
-    .slice(0, 6)
     .forEach(({ match, waited }) => {
-      alerts.push({
-        id: `result-${match.matchId}`,
-        severity: waited > 10 ? 'URGENT' : 'IMPORTANT',
-        kind: 'MISSING_RESULT',
-        title: '結果が未入力です',
-        detail: `${match.courtName ?? 'コート未定'} ${match.playerAName} × ${match.playerBName}／終了 ${Math.round(waited)}分前`,
-        matchId: match.matchId,
-        courtId: match.courtId ?? undefined,
-      });
+      const claim = match.reportedScoreA !== null && match.reportedScoreA !== undefined
+        ? `${match.reportedScoreA}-${match.reportedScoreB}` : null;
+      if (match.resultStatus === 'DISPUTED') {
+        pendingAlerts.push({
+          id: `dispute-${match.matchId}`,
+          severity: 'URGENT',
+          kind: 'RESULT_DISPUTED',
+          title: '結果の申告が食い違っています',
+          detail: `${match.playerAName} × ${match.playerBName}／運営がスコアを決めてください`,
+          matchId: match.matchId,
+          courtId: match.courtId ?? undefined,
+        });
+        return;
+      }
+      if (match.resultStatus === 'ENTERED') {
+        // The opponent still has their own window to confirm; that is not a problem.
+        if (waited <= confirmTimeout) return;
+        pendingAlerts.push({
+          id: `unconfirmed-${match.matchId}`,
+          severity: waited > confirmTimeout * 2 ? 'URGENT' : 'IMPORTANT',
+          kind: 'RESULT_UNCONFIRMED',
+          title: '確定されない結果が待っています',
+          detail: `${match.playerAName} × ${match.playerBName}／申告 ${claim ?? '—'} が ${Math.round(waited)}分そのまま（コート確保中）`,
+          matchId: match.matchId,
+          courtId: match.courtId ?? undefined,
+        });
+        return;
+      }
+      if (waited > resultGrace) {
+        pendingAlerts.push({
+          id: `result-${match.matchId}`,
+          severity: waited > 10 ? 'URGENT' : 'IMPORTANT',
+          kind: 'MISSING_RESULT',
+          title: '結果が未入力です',
+          detail: `${match.courtName ?? 'コート未定'} ${match.playerAName} × ${match.playerBName}／終了 ${Math.round(waited)}分前`,
+          matchId: match.matchId,
+          courtId: match.courtId ?? undefined,
+        });
+      }
     });
+  alerts.push(...pendingAlerts.slice(0, 6));
 
   // 2) Players waiting 30+ minutes.
   const longWait = (engine?.waitingPlayers ?? []).filter((player) => player.waitingMinutes >= 30);

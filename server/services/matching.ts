@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { asRows, makeId, nowIso, pairKey, transaction } from '../db.js';
 import { ApiError } from '../http.js';
+import { confirmStaleResults } from './results.js';
 
 export type MatchStatus = 'WAITING' | 'CALLED' | 'COURT_ASSIGNED' | 'PLAYING' | 'RESULT_PENDING'
   | 'COMPLETED' | 'CANCELLED' | 'DISPUTED' | 'NO_SHOW';
@@ -519,6 +520,9 @@ export interface RunEngineOptions extends EvaluateOptions {
  */
 export function runEngine(db: DB, eventId: string, options: RunEngineOptions = {}): EngineRunResult {
   const nowMs = options.nowMs ?? Date.now();
+  // Unconfirmed reports are cleared before the board is read, so a court held only by
+  // a result nobody confirmed comes back into play in the same pass.
+  if (!options.dryRun) confirmStaleResults(db, eventId);
   const ctx = loadEngineContext(db, eventId, nowMs);
   const dryRun = options.dryRun === true;
   const { candidates, blocked, blockedCounts, reportLimit } = evaluateCandidates(ctx, options);

@@ -6,18 +6,24 @@ interface Props {
   view: MyMatchView;
   nowMs: number;
   onEnterResult: (matchId: string) => void;
+  /** The opponent reported a score: confirm it as it stands. */
+  onConfirmResult: (matchId: string) => void;
+  /** Report a different score instead, which routes the card to staff. */
+  onDisputeResult: (matchId: string) => void;
 }
 
 /**
  * The only question on a player's phone is "when do I play, and where?".
  * Everything else on this screen is subordinate to that answer.
  */
-export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
+export function NextMatchCard({ view, nowMs, onEnterResult, onConfirmResult, onDisputeResult }: Props) {
   const next = view.nextMatch;
   const playable = next && (next.status === 'PLAYING' || next.status === 'RESULT_PENDING' || next.status === 'COURT_ASSIGNED');
   const startMs = next ? parseIso(next.startTime ?? next.scheduledTime) : null;
   const remaining = startMs === null ? null : Math.round((startMs - nowMs) / 60_000);
   const bracket = next?.bracket ?? null;
+  const report = next?.result ?? null;
+  const confirmTimeout = view.event.resultConfirmTimeoutMinutes ?? 3;
 
   if (!next) {
     const estimate = view.waiting.estimateMinutes;
@@ -103,10 +109,39 @@ export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
           </div>
         ) : null}
 
+        {report && report.status === 'ENTERED' ? (
+          <div className={`m-report${report.enteredByMe ? ' waiting' : ' ask'}`}>
+            <b>{report.enteredByMe ? '相手の確定を待っています' : '相手の申告内容を確認してください'}</b>
+            <div className="m-report-score num">{report.scoreMine ?? 0} - {report.scoreOpponent ?? 0}</div>
+            <span>
+              {report.enteredByMe
+                ? `相手が「確定」を押せば順位に反映されます。${confirmTimeout}分そのままなら自動で確定します。`
+                : `このスコアで良ければ「確定」を押してください。違う場合は自分の申告を送信すると運営の確認に切り替わります。`}
+            </span>
+            {report.canConfirm ? (
+              <div className="m-sheet-actions">
+                <button className="m-btn primary" onClick={() => onConfirmResult(next.matchId)}>この内容で確定</button>
+                <button className="m-btn" onClick={() => onDisputeResult(next.matchId)}>スコアが違う</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {report && report.status === 'DISPUTED' ? (
+          <div className="m-report dispute">
+            <b>申告が食い違っています</b>
+            <span>
+              {report.claim && report.claim.scoreMine !== null && report.claim.scoreOpponent !== null
+                ? <>相手の申告は <b className="num">{report.claim.scoreMine}-{report.claim.scoreOpponent}</b>。</> : null}
+              運営が確認するまで順位には入りません。コートの係に直接お伝えください。
+            </span>
+            {report.claim?.note ? <em>メモ：{report.claim.note}</em> : null}
+          </div>
+        ) : null}
+
         <div className="m-actions">
           {playable ? (
             <button className="m-btn primary" onClick={() => onEnterResult(next.matchId)}>
-              <ClipboardCheck size={17} />結果を入力
+              <ClipboardCheck size={17} />{report && report.status === 'ENTERED' && !report.enteredByMe ? '自分の申告を送信' : '結果を入力'}
             </button>
           ) : (
             <button className="m-btn" onClick={() => navigator.vibrate?.([120, 60, 120])}>

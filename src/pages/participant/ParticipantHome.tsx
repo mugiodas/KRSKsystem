@@ -118,7 +118,12 @@ export function ParticipantHome() {
         {error ? <div className="notice error">{error}</div> : null}
         {tab === 'next' ? (
           <>
-            <NextMatchCard view={view} nowMs={nowMs} onEnterResult={(matchId) => setResultFor(matchId)} />
+            <NextMatchCard
+              view={view} nowMs={nowMs}
+              onEnterResult={(matchId) => setResultFor(matchId)}
+              onConfirmResult={(matchId) => { void api.confirmResult(eventId, matchId).then(load).catch(() => undefined); }}
+              onDisputeResult={(matchId) => setResultFor(matchId)}
+            />
             <div className="m-stats">
               <div className="m-stat"><b>{view.today.played}</b><span>本日試合</span></div>
               <div className="m-stat"><b>{view.today.wins}</b><span>勝利</span></div>

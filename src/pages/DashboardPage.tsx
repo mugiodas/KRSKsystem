@@ -218,6 +218,7 @@ export function DashboardPage() {
                   onResult={(match) => setModal({ type: 'result', matchId: match.matchId, mode: match.status === 'COMPLETED' ? 'correct' : 'enter' })}
                   onCall={(match) => void act('コートを呼出しました', () => api.matchAction(eventId, match.matchId, 'ASSIGN', match.rowVersion, { courtId: match.courtId }))}
                   onManualAssign={(match, courtId) => void act('コートを移動しました', () => api.patchMatch(eventId, match.matchId, { courtId, rowVersion: match.rowVersion }))}
+                  onConfirm={(match) => void act('結果を確定しました。次カードを自動割当中です。', () => api.confirmResult(eventId, match.matchId))}
                 />
                 <div style={{ display: 'grid', gap: 10, minHeight: 0 }}>
                   <MatchQueue

@@ -69,8 +69,11 @@ export function ResultModal({ eventId, match: listed, mode, targetMinutes, onDon
         await api.correctResult(eventId, match.matchId, scoreA, scoreB, match.result?.rowVersion ?? match.rowVersion);
         toast.push('結果を修正しました。ランキングを再計算しました。');
       } else {
-        await api.enterResult(eventId, match.matchId, scoreA, scoreB, match.rowVersion);
-        toast.push(`${match.courtName ?? 'コート'} の結果を登録しました。次カードを自動割当中です。`);
+        const entered = await api.enterResult(eventId, match.matchId, scoreA, scoreB, match.rowVersion);
+        const status = entered.resultStatus;
+        toast.push(status === 'CONFIRMED'
+          ? `${match.courtName ?? 'コート'} の結果を確定しました。次カードを自動割当中です。`
+          : `${match.courtName ?? 'コート'} の結果を受け付けました。相手選手の確定を待ちます。`);
       }
       onDone();
       onClose();
@@ -96,8 +99,8 @@ export function ResultModal({ eventId, match: listed, mode, targetMinutes, onDon
             {match.courtName ?? 'コート未定'} ・ {match.className ?? 'クラスなし'}
             {elapsed !== null ? ` ・ 所要 ${elapsed}分（目標 ${targetMinutes}分）` : ''}
           </span>
-          {match.result && match.result.status !== 'CONFIRMED' ? (
-            <button className="btn" disabled={busy} onClick={confirmStoredResult}><Check size={13} />確認済みにする</button>
+          {match.result && (match.result.status === 'ENTERED' || match.result.status === 'DISPUTED') ? (
+            <button className="btn" disabled={busy} onClick={confirmStoredResult}><Check size={13} />申告内容で確定</button>
           ) : null}
           <button className="btn" onClick={onClose}>キャンセル</button>
           <button className="btn primary" disabled={!canSubmit || saving} onClick={submit}>
@@ -123,16 +126,33 @@ export function ResultModal({ eventId, match: listed, mode, targetMinutes, onDon
           <button className="btn sm subtle" onClick={() => { setScoreA(scoreB); setScoreB(scoreA); }}>入替</button>
         </div>
 
+        {match.result && (match.result.status === 'ENTERED' || match.result.status === 'DISPUTED') ? (
+          <div className={`notice ${match.result.status === 'DISPUTED' ? 'warn' : 'info'}`}>
+            <span>
+              選手からの申告: <b className="num">{match.result.scoreA}-{match.result.scoreB}</b>
+              （{match.result.enteredByParticipant ? '選手入力' : '運営入力'}・確定待ち）
+              {match.result.dispute ? <> / 相手の申告: <b className="num">{match.result.dispute.scoreA ?? '—'}-{match.result.dispute.scoreB ?? '—'}</b>
+                {match.result.dispute.note ? <>・メモ「{match.result.dispute.note}」</> : null}</> : null}
+              。{match.result.status === 'DISPUTED' ? '申告が食い違っているため、この試合は順位に反映されていません。' : 'この段階では順位表にもトーナメントにも反映されません。'}
+              どちらでもない場合は上のスコアを書き込んで「このスコアで確定」を押してください（運営の入力は即確定します）。
+            </span>
+          </div>
+        ) : null}
         <div className="notice info">
           <span>
-            登録すると試合が <b>COMPLETED</b> になり、コートが空き、順位表とマッチング待ち時間が再計算されます。
+            確定すると試合が <b>COMPLETED</b> になり、コートが空き、順位表とマッチング待ち時間が再計算されます。
+            選手が入力した結果は<b>相手か運営が確定するまで</b>反映されません。
             {mode === 'enter' ? ' 間違えた場合は OWNERS/ADMIN が結果を修正できます。' : ''}
           </span>
         </div>
         {winner === null ? <div style={{ fontSize: 11, color: 'var(--warn)' }}>同点では登録できません。どちらかが勝っているスコアを入力してください。</div> : null}
         <div style={{ display: 'flex', gap: 6 }}>
           <Chip tone={match.status === 'RESULT_PENDING' ? 'warn' : 'blue'}>{match.status === 'RESULT_PENDING' ? '試合終了・結果待ち' : '試合中'}</Chip>
-          {match.result ? <Chip tone="ok">結果 {match.result.status === 'CONFIRMED' ? '確認済' : '入力済'}</Chip> : null}
+          {match.result ? (
+            <Chip tone={match.result.status === 'DISPUTED' ? 'urgent' : match.result.status === 'ENTERED' ? 'warn' : 'ok'}>
+              結果 {match.result.status === 'CONFIRMED' ? '確認済' : match.result.status === 'CORRECTED' ? '修正済' : match.result.status === 'ENTERED' ? '相手確定待ち' : '申告不一致'}
+            </Chip>
+          ) : <Chip tone="warn">結果未入力</Chip>}
         </div>
       </div>
     </Modal>

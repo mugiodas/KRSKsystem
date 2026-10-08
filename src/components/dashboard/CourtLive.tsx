@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Flag, Pause, Play, Timer, Volume2 } from 'lucide-react';
+import { Check, Flag, Pause, Play, Timer, Volume2 } from 'lucide-react';
 import type { CourtRow, MatchRow } from '../../api/types';
 import { clockTime, parseIso, stopwatch } from '../../lib/time';
 import { Chip, COURT_LABEL, Empty, statusTone } from '../ui';
@@ -15,9 +15,11 @@ interface Props {
   onResult: (match: MatchRow) => void;
   onCall: (match: MatchRow) => void;
   onManualAssign: (match: MatchRow, courtId: string) => void;
+  /** Staff shortcut for "the players agreed, commit it". */
+  onConfirm: (match: MatchRow) => void;
 }
 
-export function CourtLive({ courts, matches, nowMs, canOperate, matchMinutes, onStart, onFinish, onResult, onCall, onManualAssign }: Props) {
+export function CourtLive({ courts, matches, nowMs, canOperate, matchMinutes, onStart, onFinish, onResult, onCall, onManualAssign, onConfirm }: Props) {
   const byCourt = useMemo(() => {
     const map = new Map<string, MatchRow>();
     for (const match of matches) {
@@ -47,7 +49,7 @@ export function CourtLive({ courts, matches, nowMs, canOperate, matchMinutes, on
                 <CourtCard
                   key={court.courtId} court={court} match={match} nowMs={nowMs} canOperate={canOperate}
                   matchMinutes={matchMinutes} courts={courts}
-                  onStart={onStart} onFinish={onFinish} onResult={onResult} onCall={onCall} onManualAssign={onManualAssign}
+                  onStart={onStart} onFinish={onFinish} onResult={onResult} onCall={onCall} onManualAssign={onManualAssign} onConfirm={onConfirm}
                 />
               );
             })}
@@ -58,7 +60,7 @@ export function CourtLive({ courts, matches, nowMs, canOperate, matchMinutes, on
   );
 }
 
-function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onStart, onFinish, onResult, onCall, onManualAssign }: {
+function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onStart, onFinish, onResult, onCall, onManualAssign, onConfirm }: {
   court: CourtRow;
   match?: MatchRow;
   nowMs: number;
@@ -70,7 +72,14 @@ function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onSt
   onResult: (match: MatchRow) => void;
   onCall: (match: MatchRow) => void;
   onManualAssign: (match: MatchRow, courtId: string) => void;
+  onConfirm: (match: MatchRow) => void;
 }) {
+  // A report the opponent has not confirmed yet is shown but never counted.
+  const pending = match?.resultStatus === 'ENTERED' || match?.resultStatus === 'DISPUTED';
+  const dispute = match?.resultStatus === 'DISPUTED';
+  const claimed = pending && match
+    ? [match.reportedScoreA ?? '-', match.reportedScoreB ?? '-'].join('-')
+    : null;
   const startMs = parseIso(match?.startTime);
   const elapsedSeconds = startMs === null ? 0 : Math.max(0, Math.round((nowMs - startMs) / 1000));
   const targetSeconds = matchMinutes * 60;
@@ -83,7 +92,10 @@ function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onSt
       <header className="court-top">
         <b>{court.courtName}</b>
         {match
-          ? <Chip tone={statusTone(match.status)} dot>{match.status === 'PLAYING' ? '試合中' : match.status === 'RESULT_PENDING' ? '結果待ち' : 'コート割当'}</Chip>
+          ? <Chip tone={statusTone(match.status)} dot>{match.status === 'PLAYING' ? '試合中'
+              : match.status === 'RESULT_PENDING'
+                ? dispute ? '申告不一致' : pending ? '相手の確定待ち' : '結果待ち'
+                : 'コート割当'}</Chip>
           : <Chip tone={blocked ? 'urgent' : 'ok'} dot>{blocked ? '使用不可' : '空き'}</Chip>}
         <span className="spacer" />
         {match && startMs !== null ? (
@@ -106,7 +118,11 @@ function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onSt
                   <div className="name">{name}{won ? <span className="chip ok" style={{ marginLeft: 5 }}>WIN</span> : null}</div>
                   <div className="club">{club}</div>
                 </div>
-                <div className="score-box num">{score === null || score === undefined ? <span style={{ color: 'var(--line-strong)' }}>–</span> : score}</div>
+                <div className="score-box num">
+                  {score === null || score === undefined
+                    ? (pending ? <span style={{ color: 'var(--warn)' }}>{side === 'A' ? match.reportedScoreA : match.reportedScoreB}</span> : <span style={{ color: 'var(--line-strong)' }}>–</span>)
+                    : score}
+                </div>
               </div>
             ))}
           </div>
@@ -115,7 +131,10 @@ function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onSt
             {match.status === 'COURT_ASSIGNED' && canOperate ? <button className="btn primary sm" onClick={() => onStart(match)}><Play size={12} />開始</button> : null}
             {match.status === 'PLAYING' && canOperate ? <button className="btn sm" onClick={() => onFinish(match)}><Flag size={12} />終了</button> : null}
             {match.status === 'PLAYING' || match.status === 'RESULT_PENDING' ? (
-              <button className="btn primary sm" onClick={() => onResult(match)}><Volume2 size={12} />結果入力</button>
+              <button className="btn primary sm" onClick={() => onResult(match)}><Volume2 size={12} />{pending ? '上書き・確定' : '結果入力'}</button>
+            ) : null}
+            {pending && canOperate ? (
+              <button className="btn sm" onClick={() => onConfirm(match)}><Check size={12} />{dispute ? 'どちらかを確定' : '確定'}</button>
             ) : null}
             {match.status === 'COURT_ASSIGNED' && canOperate ? (
               <select
@@ -127,7 +146,9 @@ function CourtCard({ court, match, nowMs, canOperate, matchMinutes, courts, onSt
               </select>
             ) : null}
             <span style={{ flex: '1 1 auto' }} />
-            <span className="hint" style={{ fontSize: 10.5 }}>{match.source === 'MANUAL' ? '手動' : match.source === 'REQUEST' ? '希望' : '自動'} {match.scheduledTime ? clockTime(match.scheduledTime) : ''}</span>
+            <span className="hint" style={{ fontSize: 10.5 }}>
+              {pending && claimed ? <>選手申告 {claimed}{dispute ? '（不一致）' : '・相手未確定'}</> : <>{match.source === 'MANUAL' ? '手動' : match.source === 'REQUEST' ? '希望' : '自動'} {match.scheduledTime ? clockTime(match.scheduledTime) : ''}</>}
+            </span>
           </div>
         </>
       ) : blocked ? (

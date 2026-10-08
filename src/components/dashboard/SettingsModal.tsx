@@ -55,6 +55,7 @@ export function SettingsModal({ event, onClose, onSaved }: Props) {
     defaultMatchMinutes: Number(event.defaultMatchMinutes),
     minimumRestMinutes: Number(event.minimumRestMinutes),
     resultInputGraceMinutes: Number(event.resultInputGraceMinutes),
+    resultConfirmTimeoutMinutes: Number(event.resultConfirmTimeoutMinutes ?? 3),
     safetyMarginMinutes: Number(event.safetyMarginMinutes),
     leagueMatchCount: Number(event.leagueMatchCount),
   });
@@ -142,7 +143,7 @@ export function SettingsModal({ event, onClose, onSaved }: Props) {
         </div>
       </div>
       <div className="kv">
-        {([['defaultMatchMinutes', '1試合(分)'], ['minimumRestMinutes', '最低休憩(分)'], ['resultInputGraceMinutes', '結果入力猶予(分)'],
+        {([['defaultMatchMinutes', '1試合(分)'], ['minimumRestMinutes', '最低休憩(分)'], ['resultInputGraceMinutes', '結果入力猶予(分)'], ['resultConfirmTimeoutMinutes', '結果の自動確定(分)'],
           ['safetyMarginMinutes', '安全マージン(分)'], ['leagueMatchCount', 'リーグ試合数/人']] as const).map(([key, label]) => (
           <div key={key}>
             <dt>{label}</dt>

@@ -30,7 +30,7 @@ const noop = () => undefined;
 
 describe('Phase 5: participant phone surface', () => {
   it('answers when and where while waiting, without operator clutter', () => {
-    const html = renderToStaticMarkup(createElement(NextMatchCard, { view: baseView(), nowMs: NOW, onEnterResult: noop }));
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view: baseView(), nowMs: NOW, onEnterResult: noop, onConfirmResult: noop, onDisputeResult: noop }));
     expect(html).toContain('待機中');
     expect(html).toContain('34');                       // own waiting minutes
     expect(html).toContain('3 / 11');                   // queue position, explained
@@ -44,7 +44,7 @@ describe('Phase 5: participant phone surface', () => {
   it('explains a mandatory break instead of showing a fake queue place', () => {
     const view = baseView({ waiting: { minutes: 4, estimateMinutes: 6, position: null, waitingCount: 9, restBlocked: true,
       restReadyInMinutes: 5.6, slotMinutes: 23, freeCourts: 0 } });
-    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop, onConfirmResult: noop, onDisputeResult: noop }));
     expect(html).toContain('休憩中です');
     expect(html).toContain('6');
     // No fake queue estimate while the player is blocked by the rest rule:
@@ -56,9 +56,9 @@ describe('Phase 5: participant phone surface', () => {
   it('turns into a call card with the court number as the hero when assigned', () => {
     const view = baseView({
       nextMatch: { matchId: 'm1', status: 'CALLED', courtName: 'COURT 3', courtNumber: 3, opponentName: '井上 湊', opponentClub: '大津シャトル',
-        scheduledTime: new Date(NOW + 4 * 60_000).toISOString(), startTime: null, phase: 'REQUEST', scoreA: null, scoreB: null, isMineSideA: true, bracket: null },
+        scheduledTime: new Date(NOW + 4 * 60_000).toISOString(), startTime: null, phase: 'REQUEST', scoreA: null, scoreB: null, isMineSideA: true, bracket: null, result: null },
     });
-    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop, onConfirmResult: noop, onDisputeResult: noop }));
     expect(html).toContain('コートへ向かってください');
     expect(html).toContain('m-hero-court');
     expect(html.match(/<b[^>]*>3<\/b>/)).toBeTruthy();   // court number is the largest element
@@ -71,9 +71,9 @@ describe('Phase 5: participant phone surface', () => {
   it('offers result entry while playing', () => {
     const view = baseView({
       nextMatch: { matchId: 'm1', status: 'PLAYING', courtName: 'COURT 1', courtNumber: 1, opponentName: '井上 湊', opponentClub: '大津シャトル',
-        scheduledTime: null, startTime: new Date(NOW - 6 * 60_000).toISOString(), phase: 'LEAGUE', scoreA: 11, scoreB: 9, isMineSideA: true, bracket: null },
+        scheduledTime: null, startTime: new Date(NOW - 6 * 60_000).toISOString(), phase: 'LEAGUE', scoreA: 11, scoreB: 9, isMineSideA: true, bracket: null, result: null },
     });
-    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop, onConfirmResult: noop, onDisputeResult: noop }));
     expect(html).toContain('試合中');
     expect(html).toContain('結果を入力');
     expect(html).toContain('11 - 9');
@@ -84,9 +84,9 @@ describe('Phase 5: participant phone surface', () => {
       event: { ...baseView().event, phase: 'TOURNAMENT' },
       nextMatch: { matchId: 'm1', status: 'COURT_ASSIGNED', courtName: 'COURT 2', courtNumber: 2, opponentName: '井上 湊', opponentClub: '大津シャトル',
         scheduledTime: new Date(NOW + 2 * 60_000).toISOString(), startTime: null, phase: 'TOURNAMENT', scoreA: null, scoreB: null,
-        isMineSideA: true, bracket: { round: 2, rounds: 3, roundLabel: '準決勝', bracketStatus: 'OPEN' } },
+        isMineSideA: true, bracket: { round: 2, rounds: 3, roundLabel: '準決勝', bracketStatus: 'OPEN' }, result: null },
     });
-    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop, onConfirmResult: noop, onDisputeResult: noop }));
     expect(html).toContain('準決勝');
     expect(html).toContain('トーナメント 準決勝');
     expect(html).toContain('勝てば 次のラウンド');

@@ -132,9 +132,9 @@ describe('Phase 6: event report', () => {
     const report = (await agent.get(`/api/events/${fixture.eventId}/report`).expect(200)).body.data;
     // src/api/types.ts mirrors this shape by hand, so an accidental rename has to fail here.
     expect(Object.keys(report).sort()).toEqual([
-      'automation', 'courts', 'eventDate', 'eventId', 'eventMode', 'eventName', 'fairness',
-      'generatedAt', 'integrity', 'matchCount', 'matches', 'noShows', 'participants', 'phase',
-      'requests', 'rows', 'standings', 'status', 'tournament', 'venue', 'waiting', 'window',
+      'automation', 'confirmations', 'courts', 'eventDate', 'eventId', 'eventMode', 'eventName',
+      'fairness', 'generatedAt', 'integrity', 'matchCount', 'matches', 'noShows', 'participants',
+      'phase', 'requests', 'rows', 'standings', 'status', 'tournament', 'venue', 'waiting', 'window',
     ]);
     expect(Object.keys(report.courts).sort()).toEqual(['availableMinutes', 'busyMinutes', 'count', 'perCourt', 'utilization']);
     expect(Object.keys(report.requests).sort()).toEqual(['active', 'cancelled', 'expired', 'fulfillmentRate', 'matched', 'total']);
@@ -144,8 +144,12 @@ describe('Phase 6: event report', () => {
       'pointDifference', 'pointsAgainst', 'pointsFor', 'played', 'rating', 'requestCount',
       'requestFulfilled', 'totalWaitingMinutes', 'winRate', 'wins', 'losses',
     ].sort());
-    expect(report.integrity).toMatchObject({ checks: 18, clean: true, violations: [] });
+    expect(report.integrity).toMatchObject({ checks: 20, clean: true, violations: [] });
     expect(report.courts.perCourt[0]).toHaveProperty('courtName');
+    expect(Object.keys(report.confirmations).sort()).toEqual([
+      'autoConfirmed', 'avgConfirmMinutes', 'byPlayers', 'confirmed', 'confirmRate', 'corrected',
+      'disputed', 'entered', 'pendingMatches', 'total',
+    ].sort());
   });
 
   it('exports a CSV a spreadsheet can open, and keeps it staff only', async () => {

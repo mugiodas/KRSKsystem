@@ -56,6 +56,11 @@ export interface EventReport {
   fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
   automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
   noShows: { count: number; affectedPlayers: number; rate: number };
+  confirmations: {
+    total: number; confirmed: number; corrected: number; entered: number; disputed: number;
+    autoConfirmed: number; byPlayers: number; pendingMatches: number; avgConfirmMinutes: number | null;
+    confirmRate: number;
+  };
   tournament: {
     brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
     byClass: Array<{ classId: string; className: string; size: number; rounds: number; status: string; winner: string | null }>;
@@ -67,6 +72,41 @@ export interface EventReport {
 }
 
 /** Mode C summary: how much of the draw exists and who won it. */
+/**
+ * How the two-step result flow behaved: what the players reported themselves, how long
+ * a confirmation took, and anything still waiting for a tap. Every number is read from
+ * `results`, so an unconfirmed report is never counted as a played match.
+ */
+function buildConfirmationSection(db: DB, eventId: string) {
+  const totals = db.prepare(`SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN r.status = 'CONFIRMED' THEN 1 ELSE 0 END) AS confirmed,
+      SUM(CASE WHEN r.status = 'CORRECTED' THEN 1 ELSE 0 END) AS corrected,
+      SUM(CASE WHEN r.status = 'ENTERED' THEN 1 ELSE 0 END) AS entered,
+      SUM(CASE WHEN r.status = 'DISPUTED' THEN 1 ELSE 0 END) AS disputed,
+      SUM(CASE WHEN r.auto_confirmed = 1 THEN 1 ELSE 0 END) AS auto_confirmed,
+      SUM(CASE WHEN r.entered_by_participant IS NOT NULL THEN 1 ELSE 0 END) AS by_players,
+      AVG(CASE WHEN r.confirmed_at IS NOT NULL THEN (julianday(r.confirmed_at) - julianday(r.entered_at)) * 1440.0 END) AS avg_minutes
+    FROM results r JOIN matches m ON m.match_id = r.match_id WHERE m.event_id = ?`).get(eventId) as Record<string, number | null>;
+  const pending = db.prepare(`SELECT COUNT(*) AS count FROM matches WHERE event_id = ? AND status = 'RESULT_PENDING'`)
+    .get(eventId) as { count: number };
+  const total = Number(totals.total ?? 0);
+  const settled = Number(totals.confirmed ?? 0) + Number(totals.corrected ?? 0);
+  return {
+    total,
+    confirmed: Number(totals.confirmed ?? 0),
+    corrected: Number(totals.corrected ?? 0),
+    entered: Number(totals.entered ?? 0),
+    disputed: Number(totals.disputed ?? 0),
+    autoConfirmed: Number(totals.auto_confirmed ?? 0),
+    byPlayers: Number(totals.by_players ?? 0),
+    pendingMatches: Number(pending.count ?? 0),
+    avgConfirmMinutes: totals.avg_minutes === null || totals.avg_minutes === undefined
+      ? null : Number(Number(totals.avg_minutes).toFixed(1)),
+    confirmRate: total === 0 ? 0 : Number((settled / total).toFixed(3)),
+  };
+}
+
 function buildTournamentSection(db: DB, eventId: string) {
   const brackets = asRows<{ bracket_id: string; class_id: string; class_name: string; size: number; rounds: number; status: string; winner_name: string | null; entrants: number }>(
     db.prepare(`SELECT b.bracket_id, b.class_id, c.class_name, b.size, b.rounds, b.status, wp.name AS winner_name,
@@ -409,6 +449,7 @@ export function buildEventReport(db: DB, eventId: string): EventReport {
       affectedPlayers: affectedNoShow,
       rate: matchRows.length === 0 ? 0 : Number((noShowMatches / matchRows.length).toFixed(3)),
     },
+    confirmations: buildConfirmationSection(db, eventId),
     tournament: buildTournamentSection(db, eventId),
     integrity: runIntegrityChecks(db, eventId),
     standings,
@@ -434,6 +475,10 @@ export function reportToCsv(report: EventReport): string {
   lines.push(`最多試合数,${esc(report.matchCount.max)}`);
   lines.push(`トーナメント表,${report.tournament.brackets}組（進行中 ${report.tournament.open} / 確定 ${report.tournament.completed}）`);
   lines.push(`トーナメント試合数,${report.tournament.cards}試合中 ${report.tournament.decided}試合確定`);
+  lines.push(`結果の確定,${report.confirmations.confirmed + report.confirmations.corrected}/${report.confirmations.total}件（選手入力 ${report.confirmations.byPlayers}件・自動確定 ${report.confirmations.autoConfirmed}件）`);
+  if (report.confirmations.entered + report.confirmations.disputed > 0) {
+    lines.push(`確定待ち,${report.confirmations.entered}件（申告不一致 ${report.confirmations.disputed}件）`);
+  }
   if (report.tournament.champion) lines.push(`優勝,${esc(report.tournament.champion.name)}`);
   lines.push(`平均待機時間(分),${esc(report.waiting.avgMinutes)}`);
   lines.push(`最大待機時間(分),${esc(report.waiting.maxMinutes)}`);

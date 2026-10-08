@@ -92,12 +92,17 @@ export const api = {
     call<MatchRow>('PATCH', `/events/${eventId}/matches/${matchId}`, patch),
   matchAction: (eventId: string, matchId: string, action: MatchAction, rowVersion: number, extra?: Record<string, unknown>) =>
     call<MatchRow>('POST', `/events/${eventId}/matches/${matchId}/action`, { action, rowVersion, ...extra }),
-  enterResult: (eventId: string, matchId: string, scoreA: number, scoreB: number, rowVersion: number) =>
-    call<MatchRow>('POST', `/events/${eventId}/matches/${matchId}/result`, { scoreA, scoreB, rowVersion }),
+  enterResult: (eventId: string, matchId: string, scoreA: number, scoreB: number, rowVersion: number, note?: string) =>
+    call<MatchRow & { resultStatus?: string; confirmed?: boolean }>('POST', `/events/${eventId}/matches/${matchId}/result`, {
+      scoreA, scoreB, rowVersion, ...(note ? { note } : {}),
+    }),
   correctResult: (eventId: string, matchId: string, scoreA: number, scoreB: number, rowVersion: number) =>
     call<ResultRow>('PATCH', `/events/${eventId}/matches/${matchId}/result`, { scoreA, scoreB, rowVersion }),
-  confirmResult: (eventId: string, matchId: string, rowVersion: number) =>
-    call<ResultRow>('POST', `/events/${eventId}/matches/${matchId}/result/confirm`, { rowVersion }),
+  confirmResult: (eventId: string, matchId: string, rowVersion?: number) =>
+    call<MatchRow>('POST', `/events/${eventId}/matches/${matchId}/result/confirm`, rowVersion === undefined ? {} : { rowVersion }),
+  rejectResult: (eventId: string, matchId: string, note?: string | null) =>
+    call<MatchRow>('POST', `/events/${eventId}/matches/${matchId}/result/reject`, { note: note ?? null }),
+  sweepResults: (eventId: string) => call<{ confirmed: number; disputed: number; matchIds: string[] }>('POST', `/events/${eventId}/results/sweep`, {}),
 
   engineState: (eventId: string) => call<EngineState>('GET', `/events/${eventId}/engine/state`),
   enginePreview: (eventId: string, body: Record<string, unknown> = {}) => call<EngineRunResult>('POST', `/events/${eventId}/engine/preview`, body),

@@ -53,6 +53,7 @@ export function migrate(db: DB): void {
       minimum_rest_minutes INTEGER NOT NULL DEFAULT 8 CHECK (minimum_rest_minutes BETWEEN 0 AND 120),
       maximum_rest_minutes INTEGER NOT NULL DEFAULT 30 CHECK (maximum_rest_minutes BETWEEN 1 AND 300),
       result_input_grace_minutes INTEGER NOT NULL DEFAULT 3 CHECK (result_input_grace_minutes BETWEEN 0 AND 30),
+      result_confirm_timeout_minutes INTEGER NOT NULL DEFAULT 3 CHECK (result_confirm_timeout_minutes BETWEEN 0 AND 60),
       late_match_cutoff_minutes INTEGER NOT NULL DEFAULT 5 CHECK (late_match_cutoff_minutes BETWEEN 0 AND 60),
       safety_margin_minutes INTEGER NOT NULL DEFAULT 5 CHECK (safety_margin_minutes BETWEEN 0 AND 60),
       league_match_count INTEGER NOT NULL DEFAULT 4 CHECK (league_match_count BETWEEN 1 AND 50),
@@ -177,10 +178,13 @@ export function migrate(db: DB): void {
       score_b INTEGER NOT NULL CHECK (score_b BETWEEN 0 AND 99),
       winner_id TEXT NOT NULL REFERENCES participants(participant_id),
       entered_by TEXT NOT NULL REFERENCES users(user_id),
+      entered_by_participant TEXT REFERENCES participants(participant_id),
       confirmed_by TEXT REFERENCES users(user_id),
       status TEXT NOT NULL DEFAULT 'ENTERED' CHECK (status IN ('ENTERED','CONFIRMED','DISPUTED','CORRECTED')),
       entered_at TEXT NOT NULL,
       confirmed_at TEXT,
+      dispute TEXT,
+      auto_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (auto_confirmed IN (0,1)),
       updated_at TEXT NOT NULL,
       row_version INTEGER NOT NULL DEFAULT 1,
       CHECK (score_a <> score_b)
@@ -353,6 +357,11 @@ export function ensureSchema(db: DB): void {
   ensureColumn(db, 'matches', 'bracket_id', 'bracket_id TEXT REFERENCES tournament_brackets(bracket_id) ON DELETE SET NULL');
   ensureColumn(db, 'matches', 'bracket_round', 'bracket_round INTEGER');
   ensureColumn(db, 'matches', 'bracket_slot', 'bracket_slot INTEGER');
+  ensureColumn(db, 'events', 'result_confirm_timeout_minutes',
+    'result_confirm_timeout_minutes INTEGER NOT NULL DEFAULT 3');
+  ensureColumn(db, 'results', 'entered_by_participant', 'entered_by_participant TEXT REFERENCES participants(participant_id)');
+  ensureColumn(db, 'results', 'dispute', 'dispute TEXT');
+  ensureColumn(db, 'results', 'auto_confirmed', 'auto_confirmed INTEGER NOT NULL DEFAULT 0');
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_bracket_slot
     ON matches(bracket_id, bracket_round, bracket_slot) WHERE bracket_id IS NOT NULL`);
   db.exec(`UPDATE matches SET pair_key = CASE WHEN player_a_id < player_b_id

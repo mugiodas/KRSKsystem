@@ -40,6 +40,7 @@ export interface EventDetail extends Omit<EventSummary, 'participantCount' | 'co
   minimumRestMinutes: number;
   maximumRestMinutes: number;
   resultInputGraceMinutes: number;
+  resultConfirmTimeoutMinutes: number;
   lateMatchCutoffMinutes: number;
   safetyMarginMinutes: number;
   leagueMatchCount: number;
@@ -135,6 +136,23 @@ export interface MatchRow {
   rowVersion: number;
   updatedAt: string;
   result?: ResultRow | null;
+  /** Confirmation state, denormalised onto the card so lists and polls can show it. */
+  resultStatus?: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | null;
+  resultEnteredAt?: string | null;
+  resultConfirmedAt?: string | null;
+  resultEnteredByParticipant?: string | null;
+  resultAutoConfirmed?: number;
+  reportedScoreA?: number | null;
+  reportedScoreB?: number | null;
+  resultDispute?: ResultDispute | null;
+}
+
+export interface ResultDispute {
+  scoreA?: number;
+  scoreB?: number;
+  by?: string | null;
+  note?: string | null;
+  at?: string;
 }
 
 export interface ResultRow {
@@ -145,6 +163,10 @@ export interface ResultRow {
   winnerId: string;
   status: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED';
   enteredAt: string;
+  confirmedAt: string | null;
+  enteredByParticipant: string | null;
+  autoConfirmed: number;
+  dispute: ResultDispute | null;
   rowVersion: number;
 }
 
@@ -396,11 +418,26 @@ export interface MyNextMatch {
   scoreB: number | null;
   isMineSideA: boolean;
   bracket: { round: number; rounds: number; roundLabel: string; bracketStatus: string } | null;
+  result: MyResultState | null;
+}
+
+/** The state of this card's score report, from the player's own point of view. */
+export interface MyResultState {
+  status: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | 'NONE';
+  scoreMine?: number;
+  scoreOpponent?: number;
+  enteredByMe: boolean;
+  enteredAt?: string | null;
+  canConfirm: boolean;
+  canReject: boolean;
+  canSubmit?: boolean;
+  claim: { scoreMine: number | null; scoreOpponent: number | null; note: string | null } | null;
 }
 
 export interface MyMatchView {
   participant: { participantId: string; name: string; className: string | null; club: string; rating: number; active: boolean; checkedIn: boolean };
-  event: { eventName: string; status: string; phase: string; startTime: string; endTime: string; allowRequest: boolean; defaultMatchMinutes: number };
+  event: { eventName: string; status: string; phase: string; startTime: string; endTime: string; allowRequest: boolean;
+    defaultMatchMinutes: number; resultConfirmTimeoutMinutes?: number };
   today: { played: number; wins: number; losses: number; pointsFor: number; courtsUsed: number };
   rank: { rank: number; of: number; winRate: number; pointDifference: number } | null;
   nextMatch: MyNextMatch | null;
@@ -484,6 +521,10 @@ export interface EventReport {
   fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
   automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
   noShows: { count: number; affectedPlayers: number; rate: number };
+  confirmations: {
+    total: number; confirmed: number; corrected: number; entered: number; disputed: number;
+    autoConfirmed: number; byPlayers: number; pendingMatches: number; avgConfirmMinutes: number | null; confirmRate: number;
+  };
   tournament: {
     brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
     byClass: Array<{ classId: string; className: string | null; size: number; rounds: number; status: string; winner: string | null }>;

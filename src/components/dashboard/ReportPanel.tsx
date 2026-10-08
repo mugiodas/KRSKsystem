@@ -27,6 +27,8 @@ const VIOLATION_LABEL: Record<string, string> = {
   BRACKET_ADVANCE_MISSED: 'トーナメントの次カード未作成',
   BRACKET_FINAL_UNCLOSED: '決勝終了後も開いたドロー',
   BRACKET_SEED_UNKNOWN: 'ドローの勝者が参加者一覧に無い',
+  RESULT_UNCONFIRMED: '結果が確定されないまま経過',
+  RESULT_DISPUTED: '選手の申告不一致',
 };
 
 /**
@@ -105,6 +107,9 @@ export function ReportPanel({ eventId }: { eventId: string }) {
           <Kpi label="希望充足率" value={pct(report.requests.fulfillmentRate)} note={`${report.requests.matched}/${report.requests.total}件が成立`} tone={report.requests.total > 0 && report.requests.fulfillmentRate < 0.6 ? 'warn' : 'ok'} />
           <Kpi label="ノーショー" value={String(report.noShows.count)} note={`影響 ${report.noShows.affectedPlayers}名 / 比率 ${pct(report.noShows.rate)}`} tone={report.noShows.count > 0 ? 'warn' : 'ok'} />
           <Kpi label="自動採番" value={pct(report.automation.autoShare)} note={`自動 ${report.automation.createdAuto} / 手動 ${report.automation.createdManual}`} />
+          <Kpi label="結果の確定率" value={pct(report.confirmations.confirmRate)}
+            note={`確定待ち ${report.confirmations.entered + report.confirmations.disputed} / 不一致 ${report.confirmations.disputed}`}
+            tone={report.confirmations.disputed > 0 ? 'warn' : report.confirmations.confirmRate >= 0.95 ? 'ok' : 'plain'} />
         </div>
 
         <div className="report-cols">
@@ -144,6 +149,26 @@ export function ReportPanel({ eventId }: { eventId: string }) {
               </div>
             ))}
             <p className="muted report-note">稼働率 = コートが埋まっていた時間 / 使用可能時間</p>
+          </div>
+
+          <div className="report-block">
+            <h4>結果の確定</h4>
+            <dl className="report-dl">
+              <div><dt>確定済み</dt>
+                <dd className={report.confirmations.pendingMatches > 0 ? 'danger' : ''}>
+                  {report.confirmations.confirmed + report.confirmations.corrected}/{report.confirmations.total}件</dd></div>
+              <div><dt>選手の申告</dt><dd>{report.confirmations.byPlayers}件（うち自動確定 {report.confirmations.autoConfirmed}件）</dd></div>
+              <div><dt>相手の確定待ち</dt><dd className={report.confirmations.entered > 0 ? 'danger' : ''}>{report.confirmations.entered}件</dd></div>
+              <div><dt>申告の不一致</dt><dd className={report.confirmations.disputed > 0 ? 'danger' : ''}>{report.confirmations.disputed}件</dd></div>
+              <div><dt>運営の上書き</dt><dd>{report.confirmations.corrected}件</dd></div>
+              <div><dt>申告から確定まで</dt><dd>{report.confirmations.avgConfirmMinutes === null ? '—' : `${report.confirmations.avgConfirmMinutes}分`}</dd></div>
+            </dl>
+            <p className="muted report-note">
+              選手同士の相互確認（または運営の確定）を終えた結果だけを順位とドローに反映します。
+              {report.confirmations.pendingMatches > 0
+                ? ` 現在 ${report.confirmations.pendingMatches}枚が結果未入力で、コートの稼働中も続いています。`
+                : ' 結果未入力のカードはありません。'}
+            </p>
           </div>
 
           {report.tournament.brackets > 0 ? (

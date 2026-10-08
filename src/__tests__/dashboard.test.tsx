@@ -100,7 +100,7 @@ describe('Phase 4: dashboard rendering', () => {
     const html = renderToStaticMarkup(createElement(CourtLive, {
       courts: [court({}), court({ courtId: 'ct2', courtNumber: 2, courtName: 'COURT 2', status: 'AVAILABLE' })],
       matches: [playing], nowMs: NOW, canOperate: true, matchMinutes: 16,
-      onStart: () => undefined, onFinish: () => undefined, onResult: () => undefined, onCall: () => undefined, onManualAssign: () => undefined,
+      onStart: () => undefined, onFinish: () => undefined, onResult: () => undefined, onCall: () => undefined, onManualAssign: () => undefined, onConfirm: () => undefined,
     }));
     expect(html).toContain('COURT LIVE');
     expect(html).toContain('古谷 莉歩');

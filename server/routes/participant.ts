@@ -40,14 +40,46 @@ export function createParticipantRouter(db: DB): Router {
     if (!me) throw new ApiError(404, 'PARTICIPANT_NOT_FOUND', '参加者が見つかりません。');
 
     const matchRows = asRows<Record<string, any>>(db.prepare(`SELECT m.*, co.court_name, co.court_number,
-        pa.name AS player_a_name, pb.name AS player_b_name, cl.class_name
+        pa.name AS player_a_name, pb.name AS player_b_name, cl.class_name,
+        res.status AS result_status, res.score_a AS result_score_a, res.score_b AS result_score_b,
+        res.entered_by_participant AS result_entered_by, res.dispute AS result_dispute, res.entered_at AS result_entered_at
       FROM matches m
       JOIN participants pa ON pa.participant_id = m.player_a_id
       JOIN participants pb ON pb.participant_id = m.player_b_id
       LEFT JOIN courts co ON co.court_id = m.court_id
       LEFT JOIN classes cl ON cl.class_id = m.class_id
+      LEFT JOIN results res ON res.match_id = m.match_id
       WHERE m.event_id = ? AND ? IN (m.player_a_id, m.player_b_id)
       ORDER BY COALESCE(m.scheduled_time, m.created_at) DESC`).all(eventId, viewerId));
+    // What the two players have agreed (or not agreed) about this card's score.
+    const resultState = (row: Record<string, any> | null) => {
+      if (!row || !row.result_status) {
+        return row && (row.status === 'PLAYING' || row.status === 'RESULT_PENDING')
+          ? { status: 'NONE', enteredByMe: false, canConfirm: false, canReject: false } : null;
+      }
+      const enteredByMe = row.result_entered_by === viewerId;
+      let claim: Record<string, any> | null = null;
+      if (row.result_dispute) {
+        try { claim = JSON.parse(String(row.result_dispute)); } catch { claim = null; }
+      }
+      return {
+        status: String(row.result_status),
+        scoreMine: Number(row.player_a_id === viewerId ? row.result_score_a : row.result_score_b),
+        scoreOpponent: Number(row.player_a_id === viewerId ? row.result_score_b : row.result_score_a),
+        enteredByMe,
+        enteredAt: row.result_entered_at ?? null,
+        // 相手を確定させることはできない。相手の申告を「確定」できるのは自分だけ。
+        canConfirm: String(row.result_status) === 'ENTERED' && !enteredByMe,
+        canReject: String(row.result_status) === 'ENTERED' && !enteredByMe,
+        // DISPUTED は運営のみが確定する（canConfirm / canReject が false のまま）。
+        canSubmit: row.status === 'PLAYING' || row.status === 'RESULT_PENDING',
+        claim: claim && claim.scoreA !== undefined ? {
+          scoreMine: Number(row.player_a_id === viewerId ? claim.scoreA : claim.scoreB),
+          scoreOpponent: Number(row.player_a_id === viewerId ? claim.scoreB : claim.scoreA),
+          note: claim.note ?? null,
+        } : (claim && claim.note ? { scoreMine: null, scoreOpponent: null, note: String(claim.note) } : null),
+      };
+    };
 
     const completed = matchRows.filter((row) => row.status === 'COMPLETED');
     const wins = completed.filter((row) => row.winner_id === viewerId);
@@ -118,6 +150,7 @@ export function createParticipantRouter(db: DB): Router {
         eventName: String(event.event_name), status: String(event.status), phase: String(event.current_phase),
         startTime: String(event.start_time), endTime: String(event.end_time),
         allowRequest: Number(event.allow_request) === 1, defaultMatchMinutes: Number(event.default_match_minutes),
+        resultConfirmTimeoutMinutes: Number(event.result_confirm_timeout_minutes ?? 3),
       },
       today: {
         played: completed.length, wins: wins.length, losses: completed.length - wins.length,
@@ -133,7 +166,7 @@ export function createParticipantRouter(db: DB): Router {
           : (asRow<Record<string, any>>(db.prepare('SELECT club FROM participants WHERE participant_id = ?').get(next.player_a_id))?.club ?? ''),
         scheduledTime: next.scheduled_time ?? null, startTime: next.start_time ?? null,
         phase: String(next.phase), scoreA: next.score_a, scoreB: next.score_b,
-        isMineSideA: next.player_a_id === viewerId, bracket: bracketInfo,
+        isMineSideA: next.player_a_id === viewerId, bracket: bracketInfo, result: resultState(next),
       } : queuePosition ? {
         matchId: String(queuePosition.match_id), status: 'WAITING', courtName: null, courtNumber: null,
         opponentName: queuePosition.player_a_id === viewerId ? queuePosition.player_b_name : queuePosition.player_a_name,
