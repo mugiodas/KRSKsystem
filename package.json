@@ -1,0 +1,43 @@
+{
+  "name": "krsk-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Badminton Practice Match Management System",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB -c blue,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "date-fns": "^4.1.0",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/supertest": "^6.0.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^9.1.2",
+    "jsdom": "^25.0.1",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3"
+  }
+}
