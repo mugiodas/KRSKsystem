@@ -215,6 +215,34 @@ export function migrate(db: DB): void {
       updated_at TEXT NOT NULL
     );
 
+    /* Single-elimination brackets (event mode C). Only resolved pairings become
+       matches, so a bracket never holds a phantom card: an unplayed slot is simply
+       absent and the next round appears once both of its feeders are decided. */
+    CREATE TABLE IF NOT EXISTS tournament_brackets (
+      bracket_id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+      class_id TEXT NOT NULL REFERENCES classes(class_id) ON DELETE CASCADE,
+      format TEXT NOT NULL DEFAULT 'SINGLE_ELIM' CHECK (format IN ('SINGLE_ELIM')),
+      size INTEGER NOT NULL CHECK (size BETWEEN 2 AND 256),
+      rounds INTEGER NOT NULL CHECK (rounds BETWEEN 1 AND 8),
+      status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','COMPLETED','CANCELLED')),
+      winner_id TEXT REFERENCES participants(participant_id),
+      created_by TEXT REFERENCES users(user_id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      row_version INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_tournament_bracket_event ON tournament_brackets(event_id, status, class_id);
+
+    CREATE TABLE IF NOT EXISTS tournament_seeds (
+      bracket_id TEXT NOT NULL REFERENCES tournament_brackets(bracket_id) ON DELETE CASCADE,
+      slot INTEGER NOT NULL CHECK (slot >= 0),
+      participant_id TEXT NOT NULL REFERENCES participants(participant_id) ON DELETE CASCADE,
+      seed INTEGER NOT NULL CHECK (seed >= 1),
+      PRIMARY KEY (bracket_id, slot)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tournament_seeds_player ON tournament_seeds(bracket_id, participant_id);
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id TEXT REFERENCES events(event_id) ON DELETE CASCADE,
@@ -322,6 +350,11 @@ function ensureColumn(db: DB, table: string, column: string, definition: string)
 /** Idempotent schema upgrades for databases created by an earlier release. */
 export function ensureSchema(db: DB): void {
   ensureColumn(db, 'matches', 'pair_key', 'pair_key TEXT');
+  ensureColumn(db, 'matches', 'bracket_id', 'bracket_id TEXT REFERENCES tournament_brackets(bracket_id) ON DELETE SET NULL');
+  ensureColumn(db, 'matches', 'bracket_round', 'bracket_round INTEGER');
+  ensureColumn(db, 'matches', 'bracket_slot', 'bracket_slot INTEGER');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_bracket_slot
+    ON matches(bracket_id, bracket_round, bracket_slot) WHERE bracket_id IS NOT NULL`);
   db.exec(`UPDATE matches SET pair_key = CASE WHEN player_a_id < player_b_id
     THEN player_a_id || '|' || player_b_id ELSE player_b_id || '|' || player_a_id END
     WHERE pair_key IS NULL`);

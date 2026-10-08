@@ -313,6 +313,71 @@ export interface LeaguePreview {
   };
 }
 
+export interface TournamentPreviewClass {
+  classId: string;
+  className: string;
+  entrants: Array<{ participantId: string; name: string; seed: number; rating: number }>;
+  size: number;
+  rounds: number;
+  byes: number;
+  requiredMatches: number;
+  roundOneCards: number;
+  estimatedMinutes: number;
+  fitsBeforeEnd: boolean;
+  reason: string | null;
+}
+
+export interface TournamentPreview {
+  classes: TournamentPreviewClass[];
+  summary: {
+    classCount: number; entrants: number; matchCount: number;
+    blockedClasses: number; fitsBeforeEnd: boolean; perRoundMinutes: number;
+  };
+}
+
+/** One box of the draw: a card, or the slot that a bye already decided. */
+export interface TournamentPairing {
+  round: number;
+  roundLabel: string;
+  slot: number;
+  matchId: string | null;
+  playerAId: string | null;
+  playerAName: string | null;
+  playerBId: string | null;
+  playerBName: string | null;
+  status: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
+  winnerId: string | null;
+  courtName: string | null;
+  scheduledTime: string | null;
+  bye: boolean;
+}
+
+export interface TournamentBracket {
+  bracketId: string;
+  eventId: string;
+  classId: string;
+  className: string | null;
+  format: string;
+  size: number;
+  rounds: number;
+  status: string;
+  winnerId: string | null;
+  winnerName: string | null;
+  entrants: Array<{ participantId: string; name: string; seed: number; slot: number }>;
+  byes: number;
+  decidedMatches: number;
+  requiredMatches: number;
+  pairings: TournamentPairing[];
+}
+
+export interface TournamentGenerated {
+  bracket: TournamentBracket;
+  created: Array<{ matchId: string; round: number; roundLabel: string; playerAName: string; playerBName: string }>;
+  walkovers: Array<{ participantName: string; intoRound: number; roundLabel: string }>;
+}
+
 export interface ApiFailure { code: string; message: string }
 
 
@@ -330,6 +395,7 @@ export interface MyNextMatch {
   scoreA: number | null;
   scoreB: number | null;
   isMineSideA: boolean;
+  bracket: { round: number; rounds: number; roundLabel: string; bracketStatus: string } | null;
 }
 
 export interface MyMatchView {
@@ -418,6 +484,11 @@ export interface EventReport {
   fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
   automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
   noShows: { count: number; affectedPlayers: number; rate: number };
+  tournament: {
+    brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
+    byClass: Array<{ classId: string; className: string | null; size: number; rounds: number; status: string; winner: string | null }>;
+    champion: { name: string; className: string | null } | null;
+  };
   integrity: IntegrityReport;
   standings: Array<{ className: string | null; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
   rows: ParticipantReportRow[];

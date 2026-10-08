@@ -56,9 +56,43 @@ export interface EventReport {
   fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
   automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
   noShows: { count: number; affectedPlayers: number; rate: number };
+  tournament: {
+    brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
+    byClass: Array<{ classId: string; className: string; size: number; rounds: number; status: string; winner: string | null }>;
+    champion: { name: string; className: string | null } | null;
+  };
   integrity: ReturnType<typeof runIntegrityChecks>;
   standings: Array<{ className: string | null; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
   rows: ParticipantReportRow[];
+}
+
+/** Mode C summary: how much of the draw exists and who won it. */
+function buildTournamentSection(db: DB, eventId: string) {
+  const brackets = asRows<{ bracket_id: string; class_id: string; class_name: string; size: number; rounds: number; status: string; winner_name: string | null; entrants: number }>(
+    db.prepare(`SELECT b.bracket_id, b.class_id, c.class_name, b.size, b.rounds, b.status, wp.name AS winner_name,
+        (SELECT COUNT(*) FROM tournament_seeds ts WHERE ts.bracket_id = b.bracket_id) AS entrants
+      FROM tournament_brackets b
+      LEFT JOIN classes c ON c.class_id = b.class_id
+      LEFT JOIN participants wp ON wp.participant_id = b.winner_id
+      WHERE b.event_id = ? ORDER BY c.display_order, b.created_at`).all(eventId));
+  const totals = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM matches WHERE event_id = ? AND bracket_id IS NOT NULL) AS cards,
+      (SELECT COUNT(*) FROM matches WHERE event_id = ? AND bracket_id IS NOT NULL AND status = 'COMPLETED') AS decided`)
+    .get(eventId, eventId) as Record<string, number>;
+  const champion = brackets.find((row) => row.status === 'COMPLETED' && row.winner_name) ?? null;
+  return {
+    brackets: brackets.length,
+    open: brackets.filter((row) => row.status === 'OPEN').length,
+    completed: brackets.filter((row) => row.status === 'COMPLETED').length,
+    cards: Number(totals.cards ?? 0),
+    decided: Number(totals.decided ?? 0),
+    walkovers: brackets.reduce((total, row) => total + Math.max(0, Number(row.size) - Number(row.entrants)), 0),
+    byClass: brackets.map((row) => ({
+      classId: row.class_id, className: row.class_name, size: Number(row.size), rounds: Number(row.rounds),
+      status: row.status, winner: row.winner_name,
+    })),
+    champion: champion ? { name: String(champion.winner_name), className: champion.class_name ?? null } : null,
+  };
 }
 
 function stats(values: number[]) {
@@ -375,6 +409,7 @@ export function buildEventReport(db: DB, eventId: string): EventReport {
       affectedPlayers: affectedNoShow,
       rate: matchRows.length === 0 ? 0 : Number((noShowMatches / matchRows.length).toFixed(3)),
     },
+    tournament: buildTournamentSection(db, eventId),
     integrity: runIntegrityChecks(db, eventId),
     standings,
     rows,
@@ -397,6 +432,9 @@ export function reportToCsv(report: EventReport): string {
   lines.push(`1人平均試合数,${esc(report.matchCount.avg)}`);
   lines.push(`最少試合数,${esc(report.matchCount.min)}`);
   lines.push(`最多試合数,${esc(report.matchCount.max)}`);
+  lines.push(`トーナメント表,${report.tournament.brackets}組（進行中 ${report.tournament.open} / 確定 ${report.tournament.completed}）`);
+  lines.push(`トーナメント試合数,${report.tournament.cards}試合中 ${report.tournament.decided}試合確定`);
+  if (report.tournament.champion) lines.push(`優勝,${esc(report.tournament.champion.name)}`);
   lines.push(`平均待機時間(分),${esc(report.waiting.avgMinutes)}`);
   lines.push(`最大待機時間(分),${esc(report.waiting.maxMinutes)}`);
   lines.push(`レポート時点の待機(分),${esc(report.waiting.longestIdleMinutes)}`);
@@ -413,6 +451,13 @@ export function reportToCsv(report: EventReport): string {
       row.requestCount, row.requestFulfilled, row.noShows].join(','));
   }
   lines.push('');
+  if (report.tournament.brackets > 0) {
+    lines.push('');
+    lines.push('トーナメント,クラス,サイズ,ラウンド,状態,勝者');
+    for (const entry of report.tournament.byClass) {
+      lines.push([esc(entry.className), esc(entry.classId), entry.size, entry.rounds, esc(entry.status), esc(entry.winner)].join(','));
+    }
+  }
   lines.push('コート,試合数,稼働分,稼働率');
   for (const court of report.courts.perCourt) {
     lines.push([esc(court.courtName), court.matches, court.busyMinutes, court.utilization].join(','));

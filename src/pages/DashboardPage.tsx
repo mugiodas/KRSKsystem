@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Activity, BarChart3, ClipboardList, FileBarChart2, ListChecks, LogOut, Radio, RefreshCw, Settings2, Smartphone, Wand2, Zap, ZapOff } from 'lucide-react';
+import { Activity, BarChart3, ClipboardList, FileBarChart2, ListChecks, LogOut, Network, Radio, RefreshCw, Settings2, Smartphone, Wand2, Zap, ZapOff } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import type { DashboardAlert } from '../lib/alerts';
 import type { EngineState } from '../api/types';
@@ -14,6 +14,8 @@ import { ParticipantStatus } from '../components/dashboard/ParticipantStatus';
 import { ResultModal } from '../components/dashboard/ResultModal';
 import { EngineModal } from '../components/dashboard/EngineModal';
 import { LeagueModal } from '../components/dashboard/LeagueModal';
+import { BracketPanel } from '../components/dashboard/BracketPanel';
+import { TournamentModal } from '../components/dashboard/TournamentModal';
 import { ManualMatchModal } from '../components/dashboard/ManualMatchModal';
 import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { RankingPanel } from '../components/dashboard/RankingPanel';
@@ -28,6 +30,7 @@ type Modal =
   | { type: 'result'; matchId: string; mode: 'enter' | 'correct' }
   | { type: 'engine'; explainMatchId?: string | null }
   | { type: 'league' }
+  | { type: 'tournament' }
   | { type: 'manual' }
   | { type: 'settings' }
   | null;
@@ -40,7 +43,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const nowMs = useNow(1000);
   const [modal, setModal] = useState<Modal>(null);
-  const [tab, setTab] = useState<'board' | 'ranking' | 'requests' | 'announcements' | 'audit' | 'report'>('board');
+  const [tab, setTab] = useState<'board' | 'tournament' | 'ranking' | 'requests' | 'announcements' | 'audit' | 'report'>('board');
   const [selected, setSelected] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -179,6 +182,11 @@ export function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div className="tabs">
               <button aria-selected={tab === 'board'} onClick={() => setTab('board')}><Activity size={11} style={{ verticalAlign: -1 }} /> 運用ボード</button>
+              {event.eventMode === 'LEAGUE_TOURNAMENT_REQUEST' ? (
+                <button aria-selected={tab === 'tournament'} onClick={() => setTab('tournament')}>
+                  <Network size={11} style={{ verticalAlign: -1 }} /> トーナメント表
+                </button>
+              ) : null}
               <button aria-selected={tab === 'ranking'} onClick={() => setTab('ranking')}><BarChart3 size={11} style={{ verticalAlign: -1 }} /> 順位表</button>
               <button aria-selected={tab === 'requests'} onClick={() => setTab('requests')}>対戦希望</button>
               <button aria-selected={tab === 'announcements'} onClick={() => setTab('announcements')}>お知らせ配信</button>
@@ -244,6 +252,13 @@ export function DashboardPage() {
               ) : null}
             </>
           ) : null}
+          {tab === 'tournament' ? (
+            <BracketPanel
+              eventId={eventId} canOperate={canOperate} refreshKey={String(snapshot.fetchedAt)}
+              onGenerate={() => setModal({ type: 'tournament' })}
+              onResult={(matchId, mode) => setModal({ type: 'result', matchId, mode })}
+            />
+          ) : null}
           {tab === 'ranking' ? <RankingPanel eventId={eventId} participants={participants} /> : null}
           {tab === 'requests' ? (
             <RequestPanel eventId={eventId} requests={snapshot.requests} matches={snapshot.allMatches} canOperate={canOperate} onChanged={() => refresh({ silent: true })} />
@@ -270,6 +285,10 @@ export function DashboardPage() {
       ) : null}
       {modal?.type === 'league' ? (
         <LeagueModal eventId={eventId} canOperate={canOperate} endTime={event.endTime} onClose={() => setModal(null)} onGenerated={() => refresh({ silent: true })} />
+      ) : null}
+      {modal?.type === 'tournament' ? (
+        <TournamentModal eventId={eventId} canOperate={canOperate} endTime={event.endTime} onClose={() => setModal(null)}
+          onGenerated={() => { setTab('tournament'); void refresh({ silent: true }); }} />
       ) : null}
       {modal?.type === 'manual' ? (
         <ManualMatchModal

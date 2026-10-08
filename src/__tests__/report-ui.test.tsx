@@ -33,7 +33,15 @@ const report = {
   fairness: { playedStdDev: 1.4, balanceScore: 0.46, mostPlayed: '古谷 莉歩（7試合）', leastPlayed: '森 悠人（2試合）' },
   automation: { autoEngine: true, autoCourt: true, createdAuto: 8, createdManual: 1, autoShare: 0.89 },
   noShows: { count: 1, affectedPlayers: 2, rate: 0.11 },
-  integrity: { eventId: 'evt_1', checkedAt: '2026-04-11T09:00:00.000Z', checks: 14, violations: [], clean: true },
+  integrity: { eventId: 'evt_1', checkedAt: '2026-04-11T09:00:00.000Z', checks: 18, violations: [], clean: true },
+  tournament: {
+    brackets: 2, open: 1, completed: 1, cards: 9, decided: 7, walkovers: 3,
+    byClass: [
+      { classId: 'c1', className: 'Aクラス', size: 8, rounds: 3, status: 'COMPLETED', winner: '古谷 莉歩' },
+      { classId: 'c2', className: 'Bクラス', size: 4, rounds: 2, status: 'OPEN', winner: null },
+    ],
+    champion: { name: '古谷 莉歩', className: 'Aクラス' },
+  },
   standings: [{ className: 'Aクラス', rows: [{ rank: 1, name: '古谷 莉歩', played: 7, wins: 5, pointDifference: 42 }] }],
   rows: [
     {
@@ -66,7 +74,7 @@ describe('大会レポート画面', () => {
       const url = String(input);
       if (url.endsWith('/integrity')) {
         return Promise.resolve(jsonResponse({
-          data: { eventId: 'evt_1', checkedAt: '2026-04-11T09:05:00.000Z', checks: 14, clean: false, violations: [{ code: 'COURT_DOUBLE_BOOKED', severity: 'CRITICAL', count: 2, sample: 'ct1' }] },
+          data: { eventId: 'evt_1', checkedAt: '2026-04-11T09:05:00.000Z', checks: 18, clean: false, violations: [{ code: 'COURT_DOUBLE_BOOKED', severity: 'CRITICAL', count: 2, sample: 'ct1' }] },
         }));
       }
       return Promise.resolve(jsonResponse({ data: report }));
@@ -98,8 +106,13 @@ describe('大会レポート画面', () => {
     // The idle column is the live "still waiting" figure, not a realised gap.
     expect(text).toContain('いま待っている時間');
     expect(text).toContain('44分・3名');
+    // The draw is reported from the same stored rows the bracket board shows.
+    expect(text).toContain('トーナメント');
+    expect(text).toContain('8ドロー・3回戦');
+    expect(text).toContain('総合優勝：古谷 莉歩');
+    expect(text).toContain('進行中');
     // The report already carries the integrity verdict from generation time.
-    expect(text).toContain('14項目すべて合格');
+    expect(text).toContain('18項目すべて合格');
   });
 
   it('highlights the players the operators should act on', async () => {

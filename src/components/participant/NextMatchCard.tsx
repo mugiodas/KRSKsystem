@@ -17,6 +17,7 @@ export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
   const playable = next && (next.status === 'PLAYING' || next.status === 'RESULT_PENDING' || next.status === 'COURT_ASSIGNED');
   const startMs = next ? parseIso(next.startTime ?? next.scheduledTime) : null;
   const remaining = startMs === null ? null : Math.round((startMs - nowMs) / 60_000);
+  const bracket = next?.bracket ?? null;
 
   if (!next) {
     const estimate = view.waiting.estimateMinutes;
@@ -60,6 +61,7 @@ export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
   return (
     <article className={`m-card hero ${tone}`}>
       <header>
+        {bracket && !called ? <>{bracket.roundLabel}<span className="muted" style={{ fontSize: 11 }}>（全{bracket.rounds}回戦・トーナメント）</span></> : null}
         {called ? <><BellRing size={13} /> コートへ向かってください</>
           : next.status === 'PLAYING' ? '試合中'
             : next.status === 'RESULT_PENDING' ? '結果入力が必要です'
@@ -69,7 +71,7 @@ export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
         {next.courtName ? (
           <div className="m-hero-court">
             <b>{next.courtName.replace(/[^0-9]/g, '') || next.courtNumber}</b>
-            <span>{next.courtName} ・ {next.phase === 'LEAGUE' ? 'リーグ' : next.phase === 'TOURNAMENT' ? '大会' : '希望対戦'}</span>
+            <span>{next.courtName} ・ {bracket ? `トーナメント ${bracket.roundLabel}` : next.phase === 'LEAGUE' ? 'リーグ' : next.phase === 'TOURNAMENT' ? '大会' : '希望対戦'}</span>
           </div>
         ) : (
           <div className="m-hero-court"><b>コート未定</b><span>決まり次第表示されます</span></div>
@@ -112,9 +114,14 @@ export function NextMatchCard({ view, nowMs, onEnterResult }: Props) {
             </button>
           )}
         </div>
-        {next.status === 'WAITING' ? (
+        {next.status === 'WAITING' && !bracket ? (
           <p style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ink-500)' }}>
             コートが空き次第、番号が確定します。待機列 {view.waiting.position ?? '—'} 位です。
+          </p>
+        ) : null}
+        {bracket && bracket.bracketStatus === 'OPEN' ? (
+          <p style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ink-500)' }}>
+            {bracket.roundLabel === '決勝' ? '勝てば優勝です。' : `勝てば ${bracket.rounds > 2 ? '次のラウンド' : '決勝'}へ進みます。負けたらこの大会の対戦は終了です。`}
           </p>
         ) : null}
       </section>

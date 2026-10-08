@@ -56,7 +56,7 @@ describe('Phase 5: participant phone surface', () => {
   it('turns into a call card with the court number as the hero when assigned', () => {
     const view = baseView({
       nextMatch: { matchId: 'm1', status: 'CALLED', courtName: 'COURT 3', courtNumber: 3, opponentName: '井上 湊', opponentClub: '大津シャトル',
-        scheduledTime: new Date(NOW + 4 * 60_000).toISOString(), startTime: null, phase: 'REQUEST', scoreA: null, scoreB: null, isMineSideA: true },
+        scheduledTime: new Date(NOW + 4 * 60_000).toISOString(), startTime: null, phase: 'REQUEST', scoreA: null, scoreB: null, isMineSideA: true, bracket: null },
     });
     const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
     expect(html).toContain('コートへ向かってください');
@@ -71,12 +71,27 @@ describe('Phase 5: participant phone surface', () => {
   it('offers result entry while playing', () => {
     const view = baseView({
       nextMatch: { matchId: 'm1', status: 'PLAYING', courtName: 'COURT 1', courtNumber: 1, opponentName: '井上 湊', opponentClub: '大津シャトル',
-        scheduledTime: null, startTime: new Date(NOW - 6 * 60_000).toISOString(), phase: 'LEAGUE', scoreA: 11, scoreB: 9, isMineSideA: true },
+        scheduledTime: null, startTime: new Date(NOW - 6 * 60_000).toISOString(), phase: 'LEAGUE', scoreA: 11, scoreB: 9, isMineSideA: true, bracket: null },
     });
     const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
     expect(html).toContain('試合中');
     expect(html).toContain('結果を入力');
     expect(html).toContain('11 - 9');
+  });
+
+  it('names the round instead of a queue place for a tournament card', () => {
+    const view = baseView({
+      event: { ...baseView().event, phase: 'TOURNAMENT' },
+      nextMatch: { matchId: 'm1', status: 'COURT_ASSIGNED', courtName: 'COURT 2', courtNumber: 2, opponentName: '井上 湊', opponentClub: '大津シャトル',
+        scheduledTime: new Date(NOW + 2 * 60_000).toISOString(), startTime: null, phase: 'TOURNAMENT', scoreA: null, scoreB: null,
+        isMineSideA: true, bracket: { round: 2, rounds: 3, roundLabel: '準決勝', bracketStatus: 'OPEN' } },
+    });
+    const html = renderToStaticMarkup(createElement(NextMatchCard, { view, nowMs: NOW, onEnterResult: noop }));
+    expect(html).toContain('準決勝');
+    expect(html).toContain('トーナメント 準決勝');
+    expect(html).toContain('勝てば 次のラウンド');
+    // A bracket card is not a queue position, so the waiting figure must not appear.
+    expect(html).not.toContain('待機列');
   });
 
   it('shows today record and per match scores', () => {

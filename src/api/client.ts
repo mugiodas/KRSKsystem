@@ -1,6 +1,6 @@
 import type {
   AnnouncementRow, CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
-  EventReport, EventSnapshot, IntegrityReport, MyMatchView, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
+  EventReport, EventSnapshot, IntegrityReport, MyMatchView, TournamentBracket, TournamentGenerated, TournamentPreview, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
 } from './types';
 
 export class ApiError extends Error {
@@ -108,6 +108,15 @@ export const api = {
   leaguePreview: (eventId: string, classIds?: string[]) => call<LeaguePreview>('POST', `/events/${eventId}/league/preview`, { classIds }),
   leagueGenerate: (eventId: string, classIds?: string[]) =>
     call<{ createdCount: number; skippedDuplicate: number; skippedEndTime: number }>('POST', `/events/${eventId}/league/generate`, { classIds }),
+
+  tournamentPreview: (eventId: string) => call<TournamentPreview>('GET', `/events/${eventId}/tournament/preview`),
+  tournamentBrackets: (eventId: string) => call<TournamentBracket[]>('GET', `/events/${eventId}/tournament`),
+  tournamentGenerate: (eventId: string, classId: string) =>
+    call<TournamentGenerated>('POST', `/events/${eventId}/tournament/generate`, { classId }),
+  tournamentRebalance: (eventId: string, bracketId: string) =>
+    call<{ created: number; bracket: TournamentBracket }>('POST', `/events/${eventId}/tournament/${bracketId}/rebalance`, {}),
+  tournamentDelete: (eventId: string, bracketId: string) =>
+    call<{ cancelledMatches: number }>('DELETE', `/events/${eventId}/tournament/${bracketId}`),
 
   requests: (eventId: string, query = '') => call<RequestRow[]>('GET', `/events/${eventId}/requests${query}`),
   createRequest: (eventId: string, targetPlayerId: string, priority: 1 | 2 | 3, requesterId?: string) =>

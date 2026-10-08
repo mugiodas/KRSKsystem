@@ -16,6 +16,7 @@ export interface MakeEventOptions {
   startedMinutesAgo?: number;
   durationMinutes?: number;
   settings?: Record<string, unknown>;
+  eventMode?: 'LEAGUE_REQUEST' | 'REQUEST_ONLY' | 'LEAGUE_TOURNAMENT_REQUEST';
 }
 
 /** Creates a running event with a class, players and courts for engine tests. */
@@ -30,6 +31,7 @@ export async function makeEvent(
     startedMinutesAgo = 60,
     durationMinutes = 240,
     settings = {},
+    eventMode = 'REQUEST_ONLY',
   } = options;
   const start = new Date(Date.now() - startedMinutesAgo * 60_000);
   const end = new Date(start.getTime() + durationMinutes * 60_000);
@@ -39,7 +41,7 @@ export async function makeEvent(
     venue: 'テスト会場',
     startTime: start.toISOString(),
     endTime: end.toISOString(),
-    eventMode: 'REQUEST_ONLY',
+    eventMode,
     maxParticipants: 200,
   }).expect(201);
   const eventId = created.body.data.eventId;

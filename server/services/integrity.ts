@@ -4,7 +4,8 @@ import { asRows } from '../db.js';
 export type ViolationCode =
   | 'PARTICIPANT_DOUBLE_BOOKED' | 'COURT_DOUBLE_BOOKED' | 'DUPLICATE_OPEN_PAIR' | 'ORPHAN_REFERENCE'
   | 'INVALID_COMPLETED_SCORE' | 'RESULT_MISMATCH' | 'ORPHAN_RESULT' | 'COMPLETED_WITHOUT_RESULT'
-  | 'END_BEFORE_START' | 'INVALID_REQUEST' | 'REQUEST_MATCHED_TO_NON_MATCH' | 'COURT_STATE_STALE' | 'WINNER_NOT_IN_MATCH' | 'SCORE_ON_OPEN_MATCH';
+  | 'END_BEFORE_START' | 'INVALID_REQUEST' | 'REQUEST_MATCHED_TO_NON_MATCH' | 'COURT_STATE_STALE' | 'WINNER_NOT_IN_MATCH' | 'SCORE_ON_OPEN_MATCH'
+  | 'BRACKET_SLOT_DUPLICATE' | 'BRACKET_ADVANCE_MISSED' | 'BRACKET_FINAL_UNCLOSED' | 'BRACKET_SEED_UNKNOWN';
 
 /** Japanese labels shared by the QA endpoint, the CLI and the report sheet. */
 export const VIOLATION_LABELS: Record<ViolationCode, string> = {
@@ -22,6 +23,10 @@ export const VIOLATION_LABELS: Record<ViolationCode, string> = {
   COURT_STATE_STALE: 'コート状態の食い違い',
   WINNER_NOT_IN_MATCH: '勝者がカードに不在',
   SCORE_ON_OPEN_MATCH: '未終了カードにスコア',
+  BRACKET_SLOT_DUPLICATE: 'トーナメント枠の重複カード',
+  BRACKET_ADVANCE_MISSED: 'トーナメントの次ラウンド未作成',
+  BRACKET_FINAL_UNCLOSED: '決勝済みなのに未閉じのトーナメント',
+  BRACKET_SEED_UNKNOWN: 'シード外の選手が組まれたトーナメント対戦',
 };
 
 export interface IntegrityViolation {
@@ -101,6 +106,7 @@ export function runIntegrityChecks(db: DB, eventId: string): IntegrityReport {
       OR NOT EXISTS (SELECT 1 FROM participants p WHERE p.participant_id = m.player_b_id AND p.event_id = m.event_id)
       OR (m.court_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM courts c WHERE c.court_id = m.court_id AND c.event_id = m.event_id))
       OR (m.class_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM classes cl WHERE cl.class_id = m.class_id AND cl.event_id = m.event_id))
+      OR (m.bracket_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tournament_brackets tb WHERE tb.bracket_id = m.bracket_id AND tb.event_id = m.event_id))
     )`, eventId);
 
   // 5) A completed match needs a valid, decidable score.
@@ -157,10 +163,48 @@ export function runIntegrityChecks(db: DB, eventId: string): IntegrityReport {
     SELECT COUNT(*) AS count, match_id AS sample FROM matches
     WHERE event_id = ? AND ${OPEN} AND (score_a IS NOT NULL OR score_b IS NOT NULL)`, eventId);
 
+  // 13) A bracket slot holds at most one live card (the unique index enforces it,
+  //     the check catches a database that was patched behind the app's back).
+  check('BRACKET_SLOT_DUPLICATE', 'CRITICAL', `
+    SELECT COUNT(*) AS count, MIN(m.match_id) AS sample FROM matches m
+    JOIN tournament_brackets b ON b.bracket_id = m.bracket_id
+    WHERE b.event_id = ? AND m.bracket_round IS NOT NULL AND m.status <> 'CANCELLED'
+    GROUP BY m.bracket_id, m.bracket_round, m.bracket_slot HAVING COUNT(*) > 1`, eventId);
+
+  // 14) Both feeders decided but the next card missing: the draw has stalled.
+  check('BRACKET_ADVANCE_MISSED', 'CRITICAL', `
+    SELECT COUNT(*) AS count, m.match_id AS sample FROM matches m
+    JOIN tournament_brackets b ON b.bracket_id = m.bracket_id
+    JOIN matches sibling ON sibling.bracket_id = m.bracket_id
+      AND sibling.bracket_round = m.bracket_round
+      AND sibling.bracket_slot = CASE WHEN m.bracket_slot % 2 = 0 THEN m.bracket_slot + 1 ELSE m.bracket_slot - 1 END
+      AND sibling.status = 'COMPLETED' AND sibling.winner_id IS NOT NULL
+    WHERE b.event_id = ? AND b.status = 'OPEN' AND m.status = 'COMPLETED' AND m.winner_id IS NOT NULL
+      AND m.bracket_round < b.rounds
+      AND NOT EXISTS (SELECT 1 FROM matches nxt WHERE nxt.bracket_id = m.bracket_id
+        AND nxt.bracket_round = m.bracket_round + 1 AND nxt.bracket_slot = m.bracket_slot / 2
+        AND nxt.status <> 'CANCELLED')`, eventId);
+
+  // 15) A decided final has to close its bracket, with the same champion recorded.
+  check('BRACKET_FINAL_UNCLOSED', 'CRITICAL', `
+    SELECT COUNT(*) AS count, b.bracket_id AS sample FROM tournament_brackets b
+    JOIN matches f ON f.bracket_id = b.bracket_id AND f.bracket_round = b.rounds AND f.bracket_slot = 0
+    WHERE b.event_id = ? AND (
+      (b.status = 'OPEN' AND f.status = 'COMPLETED' AND f.winner_id IS NOT NULL)
+      OR (b.status = 'COMPLETED' AND (b.winner_id IS NULL OR b.winner_id <> f.winner_id)))`, eventId);
+
+  // 16) Round-1 cards may only hold seeded players of their own bracket.
+  check('BRACKET_SEED_UNKNOWN', 'CRITICAL', `
+    SELECT COUNT(*) AS count, m.match_id AS sample FROM matches m
+    JOIN tournament_brackets b ON b.bracket_id = m.bracket_id
+    WHERE b.event_id = ? AND m.bracket_round = 1 AND (
+      NOT EXISTS (SELECT 1 FROM tournament_seeds ts WHERE ts.bracket_id = m.bracket_id AND ts.participant_id = m.player_a_id)
+      OR NOT EXISTS (SELECT 1 FROM tournament_seeds ts WHERE ts.bracket_id = m.bracket_id AND ts.participant_id = m.player_b_id))`, eventId);
+
   return {
     eventId,
     checkedAt: new Date().toISOString(),
-    checks: 14,
+    checks: 18,
     violations,
     clean: violations.every((item) => item.severity !== 'CRITICAL'),
   };

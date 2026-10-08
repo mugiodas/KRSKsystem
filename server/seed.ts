@@ -3,6 +3,8 @@ import { nowIso, transaction } from './db.js';
 import { createUser } from './auth.js';
 
 export const DEMO_EVENT_ID = 'evt_demo_krsk';
+/** A second demo event in event mode C, so the tournament draw can be tried out end to end. */
+export const TOURNAMENT_DEMO_EVENT_ID = 'evt_demo_tournament';
 
 const demoParticipants = [
   ['古谷 莉歩', 'ふるたに りほ', '唐崎ジュニア', '6年', 'FEMALE', 1320],
@@ -90,6 +92,61 @@ export function seedDatabase(db: DB): void {
   });
   }
   seedDemoMatches(db, ownerId ?? null);
+  seedTournamentDemo(db, ownerId ?? null);
+}
+
+/**
+ * The mode C demo: 8 checked-in players, 2 courts, no matches yet. The operator
+ * opens the トーナメント表 tab, previews the seeded draw, generates it and plays
+ * the whole bracket without leaving the board.
+ */
+function seedTournamentDemo(db: DB, ownerId: string | null): void {
+  if (db.prepare('SELECT 1 FROM events WHERE event_id = ?').get(TOURNAMENT_DEMO_EVENT_ID)) return;
+  const now = new Date();
+  const start = new Date(now.getTime() - 10 * 60_000);
+  const end = new Date(now.getTime() + 150 * 60_000);
+  const created = nowIso();
+  transaction(db, () => {
+    db.prepare(`INSERT INTO events (
+      event_id, event_name, event_date, venue, start_time, end_time, status, event_mode, current_phase,
+      max_participants, entry_fee, description, created_at, updated_at, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', 'LEAGUE_TOURNAMENT_REQUEST', 'LEAGUE', 16, 500, ?, ?, ?, ?)`)
+      .run(TOURNAMENT_DEMO_EVENT_ID, 'KRSK SYSTEM DEMO トーナメント', now.toISOString().slice(0, 10), '唐崎市民体育館',
+        start.toISOString(), end.toISOString(),
+        '8名・1クラス・2コート。トーナメント表の自動生成から結果入力までを試すデモイベントです。', created, created, ownerId);
+
+    db.prepare(`INSERT INTO classes (class_id, event_id, class_name, display_order, description, enabled, created_at, updated_at)
+      VALUES ('cls_demo_t', ?, 'トーナメント', 1, 'シード順でドローを作成する練習会', 1, ?, ?)`).run(TOURNAMENT_DEMO_EVENT_ID, created, created);
+
+    const insertParticipant = db.prepare(`INSERT INTO participants (
+      participant_id, event_id, name, name_normalized, name_kana, club, grade, gender, category, class_id, rating,
+      active, checked_in, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SINGLES', 'cls_demo_t', ?, 1, 1, ?, ?)`);
+    demoParticipants.slice(0, 8).forEach(([name, kana, club, grade, gender, rating], index) => {
+      const participantId = `demo_t${String(index + 1).padStart(2, '0')}`;
+      insertParticipant.run(participantId, TOURNAMENT_DEMO_EVENT_ID, name, normalizeName(name), kana, club, grade, gender,
+        Number(rating) - index * 10, created, created);
+      createUser(db, {
+        email: `t${String(index + 1).padStart(2, '0')}@demo.local`,
+        displayName: name,
+        password: 'demo',
+        role: 'PARTICIPANT',
+        participantId,
+      });
+    });
+
+    const courtInsert = db.prepare(`INSERT INTO courts (
+      court_id, event_id, court_number, court_name, status, available_from, available_to, priority, enabled, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'AVAILABLE', ?, ?, ?, 1, ?, ?)`);
+    for (let i = 1; i <= 2; i += 1) {
+      courtInsert.run(`court_demo_t_${i}`, TOURNAMENT_DEMO_EVENT_ID, i, `COURT ${i}`, start.toISOString(), end.toISOString(), i, created, created);
+    }
+
+    db.prepare(`INSERT INTO announcements
+      (announcement_id, event_id, title, body, severity, active, created_by, created_at, updated_at)
+      VALUES ('ann_demo_t', ?, 'トーナメント表を試せます', '「トーナメント表」タブで自動生成を選ぶと、シード順と終了時刻の見込みをプレビューしてからドローを作成します。', 'INFO', 1, ?, ?, ?)`)
+      .run(TOURNAMENT_DEMO_EVENT_ID, ownerId, created, created);
+  });
 }
 
 function seedDemoMatches(db: DB, ownerId: string | null): void {

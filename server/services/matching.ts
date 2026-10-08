@@ -588,7 +588,12 @@ export function runEngine(db: DB, eventId: string, options: RunEngineOptions = {
       }
 
       // 2) Request phase: create new matches from the ranked candidates.
-      const canCreateRequests = ctx.event.allow_request === 1
+      // While a bracket is open the draw owns the floor: courts go to its queue only,
+      // so a free-for-all request card can never steal a semi-final's court.
+      const openBrackets = Number((db.prepare(`SELECT COUNT(*) AS total FROM tournament_brackets
+        WHERE event_id = ? AND status = 'OPEN'`).get(eventId) as { total: number }).total);
+      const bracketOpen = ctx.event.current_phase === 'TOURNAMENT' && openBrackets > 0;
+      const canCreateRequests = ctx.event.allow_request === 1 && !bracketOpen
         && (ctx.event.event_mode !== 'LEAGUE_REQUEST' || ctx.event.current_phase === 'REQUEST' || ctx.queue.length === 0);
       if (canCreateRequests) {
         for (const candidate of candidates) {
@@ -623,6 +628,8 @@ export function runEngine(db: DB, eventId: string, options: RunEngineOptions = {
           usedPairKeys.add(key);
           created.push({ matchId, courtId: court.courtId, courtName: court.courtName, playerAName: a.name, playerBName: b.name, score: candidate.score });
         }
+      } else if (bracketOpen) {
+        skippedReasons.BRACKET_OPEN = 1;
       } else if (ctx.event.allow_request === 0) {
         skippedReasons.REQUEST_DISABLED = 1;
       }

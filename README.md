@@ -8,13 +8,16 @@
 - 本番: `npm run build && npm start`（`dist` を API が一緒に配信します）
 - 確認用アカウント: `owner@krsk.local` / `admin@krsk.local` / `viewer@krsk.local`、パスワード `krsk-demo`
   選手は `p01@demo.local` … `p20@demo.local`（パスワード `demo`）。一覧は `GET /api/demo/accounts`
-- デモ大会（20名・2クラス・4コート）が初回起動時に自動投入され、そのまま全操作できます
+- デモ大会が初回起動時に自動投入され、そのまま全操作できます
+  - `KRSK SYSTEM DEMO EVENT` — モードA（20名・2クラス・4コート、リーグ戦進行中）
+  - `KRSK SYSTEM DEMO トーナメント` — モードC（8名・1クラス・2コート、カード未作成。トーナメント表のプレビューから生成までを試せます）
+  - 選手アカウント `t01@demo.local` … `t08@demo.local`（パスワード `demo`）はトーナメント側の大会に属します
 
 ## 画面
 
 | 画面 | 路径 | 内容 |
 | --- | --- | --- |
-| 運営ダッシュボード | `/events/:eventId` | ALERT → COURT LIVE → MATCH QUEUE → PARTICIPANT STATUS の4ブロック。リーグ生成プレビュー、エンジン手動実行と説明、結果入力、手動上書き、設定、操作ログ、対戦希望、お知らせ配信、大会レポート |
+| 運営ダッシュボード | `/events/:eventId` | ALERT → COURT LIVE → MATCH QUEUE → PARTICIPANT STATUS の4ブロック。リーグ生成プレビュー、トーナメント表（モードC）、エンジン手動実行と説明、結果入力、手動上書き、設定、操作ログ、対戦希望、お知らせ配信、大会レポート |
 | 選手スマホ | `/m` | PC画面の縮約ではなく「次の1試合」を主役にした別設計。つぎの試合 / 対戦希望 / 本日 / 連絡 のタブ、結果入力の共有 |
 | 大会レポート | ダッシュボード内タブ | 印刷前提の1枚もの。SVG不要・CSV同梱（下記） |
 
@@ -32,6 +35,27 @@ MatchScore = RequestPriority + WaitingScore + MatchCountBalance + UnplayedBonus
 - `source = AUTO / MANUAL` を全カードに記録し、手動上書きは自動生成の比率集計から除外されます
 - 終了時刻保護: `default_match_minutes + result_input_grace_minutes + safety_margin_minutes` に収まらないカードは作成も割当もしません
 
+## トーナメント表（大会モード C: LEAGUE → TOURNAMENT → REQUEST）
+
+`server/services/tournament.ts` が単敗淘汰のドローを組み、ダッシュボードの「トーナメント表」タブで
+プレビュー → 確定 → 進行を操作します。
+
+- 対象はチェックイン済み・active の参加者。人数から **2の冪のドローサイズ**を求め、不足枠は上位シードの不戦勝にします（不戦勝は試合行を作りません）
+- シードは順位表（勝利数 → 得失点 → レート）から自動付与。標準的なブラケット配置を使うので、不戦勝は必ず上位シード側に落ちます
+- Generate は「**両側の供給元が確定したカードだけ**」を実行テーブルに載せます。不戦勝が連鎖して決まる枠も見逃さないよう、カード作成は「供給元が2つ揃ったか」で駆動します
+- カードは `phase = TOURNAMENT`・`source = AUTO`・`priority_score = 600 + (最終ラウンド - 何回目) × 10`。通常エンジンが既存キューと同じ列でコートを割当めますが、ドローが開いている間は新しい希望対戦カードを作りません（`skippedReasons.BRACKET_OPEN`）
+- 結果入力と同じトランザクションで次ラウンドへ進めます。決勝が決まればドローを `COMPLETED`、大会フェーズを `REQUEST` に戻します
+- 安全装置:
+  - 終了時刻に収まる見込みがなければ `409 TOURNAMENT_WONT_FIT`（プレビューにも理由と所要見込を表示）
+  - 同じクラスに進行中の表があれば `409 BRACKET_EXISTS`
+  - ドローのカードは `CANCEL` / `NO_SHOW` 不可（`409 BRACKET_CARD_LOCKED`）。不戦勝扱いにしたい場合は 21-0 などの結果を入力します
+  - 勝者が既に次のラウンドで呼出済みなら、その前の結果は書き換えられません（`409 BRACKET_ADVANCED`）
+  - 削除は未消化カードだけを取り消します。プレイ中のカードがあれば `409 BRACKET_IN_PLAY` で拒否
+- 整合性チェックはドロー用の4項目を追加。表が途切れたときは「進行を直す」（rebalance）で作成漏れのカードを復元します
+- API: `GET /api/events/:eventId/tournament/preview`・`GET /api/events/:eventId/tournament`・
+  `POST /api/events/:eventId/tournament/generate`・`POST /api/events/:eventId/tournament/:bracketId/rebalance`・
+  `DELETE /api/events/:eventId/tournament/:bracketId`
+
 ## 大会レポート（Phase 6）
 
 `GET /api/events/:eventId/report` が保存済みの行だけを集計して返します（推定値は混ぜません）。
@@ -46,6 +70,7 @@ MatchScore = RequestPriority + WaitingScore + MatchCountBalance + UnplayedBonus
 | fairness | 試合数の標準偏差、バランススコア（0〜1にクランプ）、最多/最少出場 |
 | automation | 自動採番と手動作成の内訳、自動比率 |
 | noShows | 件数・影響を受けた選手数・比率 |
+| tournament | ドロー数・作成/消化カード・不戦勝数・クラス別状況・総合優勝（モードC以外は 0 埋め） |
 | integrity | 後述の整合性チェック結果を常時同梱 |
 | rows / standings | 選手別1行（試合・勝負・得点・待機・希望・欠場）とクラス別上位10名 |
 
@@ -62,10 +87,11 @@ npm run integrity                       # CLI。CRITICAL があれば exit code 
 npm run integrity -- --event evt_demo_krsk --json
 ```
 
-検査項目（14）: 選手の二重予約 / コートの二重予約 / 同一カードの重複 / 存在しないレコードへの参照 /
+検査項目（18）: 選手の二重予約 / コートの二重予約 / 同一カードの重複 / 存在しないレコードへの参照 /
 スコアが不正な完了試合 / 勝者とスコアの不一致 / 試合のない結果記録 / 結果がないまま完了 /
 終了が開始より古い / 不正な対戦希望 / 希望が別カードと接続 / コート状態の食い違い /
-勝者がカードに不在 / 未終了カードにスコア。
+勝者がカードに不在 / 未終了カードにスコア / トーナメント枠の重複 / トーナメントの次カード未作成 /
+決勝終了後も開いたドロー / ドローの勝者が参加者一覧に不在。
 
 加えて DB 側に UNIQUE 制約（同一大会内の同名選手、開いているカードの pair_key）と
 CHECK 制約（スコア範囲・同点不可・状態遷移の語彙）を置き、アプリ側の検証をすり抜けた
@@ -87,12 +113,13 @@ CHECK 制約（スコア範囲・同点不可・状態遷移の語彙）を置�
 ## テスト
 
 ```
-npm test     # 11ファイル / 74 tests（API・UI・ストレステスト）
+npm test     # 13ファイル / 92 tests（API・UI・ストレステスト）
 npm run check
 npm run build
 ```
 
-- サーバー側: event / participant / match・result / request / league / matching / stress / report / snapshot
+- サーバー側: event / participant / match・result / request / league / matching / tournament / stress / report / snapshot
+- トーナメントは API レベルで全通過検証（生成プレビュー、ドライブ通し、勝者修正の追従、停止ガード、整合性）
 - ストレッサーは 10・20・40・60・100名で大会を最後まで進行させ、**各時点で整合性チェックが 0 件**であることを検証します
 - フロント: jsdom 上で実コンポーネントを描画（運用ボード・選手スマホ・大会レポート）し、live API との形状ずれを検出します
 
@@ -102,11 +129,11 @@ npm run build
 server/
   db.ts            schema + 整合性トリガ + 設定デフォルト（node:sqlite）
   app.ts / http.ts / auth.ts / gzip.ts / seed.ts
-  routes/          core · matches · requests · engine · announcements · participant · report · snapshot
-  services/        matching · league · ranking · autoEngine · integrity · report · engineState
+  routes/          core · matches · requests · engine · announcements · participant · report · snapshot · tournament
+  services/        matching · league · tournament · ranking · autoEngine · integrity · report · engineState
 src/
   pages/           DashboardPage · participant/ParticipantHome · 認証
-  components/      dashboard/（12個） participant/（5個） ui.tsx
+  components/      dashboard/（14個） participant/（5個） ui.tsx
   api/ client.ts + types.ts（API の camelCase ミラー）
   state/ useEventSnapshot（polling 1回 = リクエスト1本）· useNow
 tests/             helpers.ts とサーバー側スイート
@@ -115,6 +142,6 @@ scripts/           reset-demo.mjs（デモDBのリセット）
 
 ## 已知の割り切り
 
-- 大会モード C（LEAGUE → **TOURNAMENT** → REQUEST）は、フェーズ管理と手動カード作成まで。自動トーナメント表の生成は未実装です（仕様の低優先項目）
+- トーナメント表は単敗淘汰のみ（3位決定戦・ダブルス・クラス横断ドロー・シードの手動並べ替えは未対応）
 - 選手自身の結果入力は即座に COMPLETED になります（ENTERED → 確認 の2段運用はしていません）
 - 体育館掲示用（大型スクリーン専用ビュー）はありません。印刷用レポートとCSVで代替します

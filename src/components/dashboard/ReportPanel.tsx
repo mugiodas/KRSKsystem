@@ -23,6 +23,10 @@ const VIOLATION_LABEL: Record<string, string> = {
   COURT_STATE_STALE: 'コート状態の食い違い',
   WINNER_NOT_IN_MATCH: '勝者がカードに不在',
   SCORE_ON_OPEN_MATCH: '未終了カードのスコア',
+  BRACKET_SLOT_DUPLICATE: 'トーナメント枠の重複',
+  BRACKET_ADVANCE_MISSED: 'トーナメントの次カード未作成',
+  BRACKET_FINAL_UNCLOSED: '決勝終了後も開いたドロー',
+  BRACKET_SEED_UNKNOWN: 'ドローの勝者が参加者一覧に無い',
 };
 
 /**
@@ -141,6 +145,33 @@ export function ReportPanel({ eventId }: { eventId: string }) {
             ))}
             <p className="muted report-note">稼働率 = コートが埋まっていた時間 / 使用可能時間</p>
           </div>
+
+          {report.tournament.brackets > 0 ? (
+            <div className="report-block">
+              <h4>トーナメント</h4>
+              <dl className="report-dl">
+                <div><dt>ドロー</dt><dd>{report.tournament.brackets}組（進行中 {report.tournament.open}・完了 {report.tournament.completed}）</dd></div>
+                <div><dt>作成カード</dt><dd>{report.tournament.cards}枚</dd></div>
+                <div><dt>結果入力済み</dt><dd className={report.tournament.decided < report.tournament.cards ? 'danger' : ''}>
+                  {report.tournament.decided}/{report.tournament.cards}枚</dd></div>
+                <div><dt>不戦勝</dt><dd>{report.tournament.walkovers}名</dd></div>
+              </dl>
+              {report.tournament.byClass.map((entry) => (
+                <div key={entry.classId} className="report-bar-row">
+                  <span className="report-bar-label">{entry.className}</span>
+                  <div className="report-bar-track">
+                    <div className="report-bar-fill" style={{ width: entry.status === 'COMPLETED' ? '100%' : '35%' }} />
+                  </div>
+                  <span className="report-bar-value">
+                    {entry.size}ドロー・{entry.rounds}回戦 ・ {entry.status === 'COMPLETED' ? `優勝 ${entry.winner ?? '—'}` : '進行中'}
+                  </span>
+                </div>
+              ))}
+              {report.tournament.champion
+                ? <p className="report-ok">総合優勝：{report.tournament.champion.name}{report.tournament.champion.className ? `（${report.tournament.champion.className}）` : ''}</p>
+                : <p className="muted report-note">決勝が終了していないクラスは「進行中」で集計されています。</p>}
+            </div>
+          ) : null}
 
           <div className="report-block">
             <h4>公平性・自動化</h4>

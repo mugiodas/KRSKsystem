@@ -134,7 +134,7 @@ describe('Phase 6: event report', () => {
     expect(Object.keys(report).sort()).toEqual([
       'automation', 'courts', 'eventDate', 'eventId', 'eventMode', 'eventName', 'fairness',
       'generatedAt', 'integrity', 'matchCount', 'matches', 'noShows', 'participants', 'phase',
-      'requests', 'rows', 'standings', 'status', 'venue', 'waiting', 'window',
+      'requests', 'rows', 'standings', 'status', 'tournament', 'venue', 'waiting', 'window',
     ]);
     expect(Object.keys(report.courts).sort()).toEqual(['availableMinutes', 'busyMinutes', 'count', 'perCourt', 'utilization']);
     expect(Object.keys(report.requests).sort()).toEqual(['active', 'cancelled', 'expired', 'fulfillmentRate', 'matched', 'total']);
@@ -144,7 +144,7 @@ describe('Phase 6: event report', () => {
       'pointDifference', 'pointsAgainst', 'pointsFor', 'played', 'rating', 'requestCount',
       'requestFulfilled', 'totalWaitingMinutes', 'winRate', 'wins', 'losses',
     ].sort());
-    expect(report.integrity).toMatchObject({ checks: 14, clean: true, violations: [] });
+    expect(report.integrity).toMatchObject({ checks: 18, clean: true, violations: [] });
     expect(report.courts.perCourt[0]).toHaveProperty('courtName');
   });
 

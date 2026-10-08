@@ -6,6 +6,7 @@ import { ApiError, sendData } from '../http.js';
 import { ensureEventAccess, requireEvent } from './core.js';
 import { loadEngineContext } from '../services/matching.js';
 import { calculateRankings } from '../services/ranking.js';
+import { roundLabel } from '../services/tournament.js';
 
 function param(req: AuthedRequest, key: string): string {
   const value = req.params[key];
@@ -93,6 +94,18 @@ export function createParticipantRouter(db: DB): Router {
       waitEstimateMinutes = Math.max(1, Math.round((state.restReadyAt - ctx.nowMs) / 60_000));
     }
 
+    // A tournament card is described by its round, not by a waiting position.
+    const bracketOf = (row: Record<string, any> | null) => {
+      if (!row || !row.bracket_id) return null;
+      const bracket = asRow<Record<string, any>>(db.prepare('SELECT rounds, status FROM tournament_brackets WHERE bracket_id = ?')
+        .get(String(row.bracket_id)));
+      if (!bracket) return null;
+      const round = Number(row.bracket_round ?? 0);
+      const rounds = Number(bracket.rounds);
+      return { round, rounds, roundLabel: roundLabel(rounds, round), bracketStatus: String(bracket.status) };
+    };
+    const bracketInfo = bracketOf(next) ?? bracketOf(queuePosition);
+
     const rankings = calculateRankings(db, eventId, me.class_id ? String(me.class_id) : undefined);
     const myRank = rankings.find((row) => row.participantId === viewerId) ?? null;
 
@@ -120,12 +133,13 @@ export function createParticipantRouter(db: DB): Router {
           : (asRow<Record<string, any>>(db.prepare('SELECT club FROM participants WHERE participant_id = ?').get(next.player_a_id))?.club ?? ''),
         scheduledTime: next.scheduled_time ?? null, startTime: next.start_time ?? null,
         phase: String(next.phase), scoreA: next.score_a, scoreB: next.score_b,
-        isMineSideA: next.player_a_id === viewerId,
+        isMineSideA: next.player_a_id === viewerId, bracket: bracketInfo,
       } : queuePosition ? {
         matchId: String(queuePosition.match_id), status: 'WAITING', courtName: null, courtNumber: null,
         opponentName: queuePosition.player_a_id === viewerId ? queuePosition.player_b_name : queuePosition.player_a_name,
         opponentClub: '', scheduledTime: queuePosition.scheduled_time ?? null, startTime: null,
         phase: String(queuePosition.phase), scoreA: null, scoreB: null, isMineSideA: queuePosition.player_a_id === viewerId,
+        bracket: bracketInfo,
       } : null,
       waiting: {
         minutes: state ? Number(state.waitingMinutes.toFixed(1)) : 0,

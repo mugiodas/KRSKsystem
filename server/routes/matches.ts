@@ -6,6 +6,7 @@ import { requireRole, type AuthedRequest } from '../auth.js';
 import { ApiError, sendData } from '../http.js';
 import { audit, ensureEventAccess, requireEvent } from './core.js';
 import { buildLeaguePreview } from '../services/league.js';
+import { advanceBracket, assertBracketTerminable, retargetBracket } from '../services/tournament.js';
 import { calculateRankings } from '../services/ranking.js';
 
 const activeStatuses = ['CALLED', 'COURT_ASSIGNED', 'PLAYING', 'RESULT_PENDING'];
@@ -267,6 +268,7 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
       throw new ApiError(409, 'INVALID_STATE_TRANSITION', `${match.status} の試合に ${input.action} は実行できません。`);
     }
     const event = requireEvent(db, eventId);
+    if (['CANCEL', 'NO_SHOW'].includes(input.action)) assertBracketTerminable(match, input.action);
     const courtId = input.courtId ?? match.court_id;
     if (['ASSIGN', 'START'].includes(input.action)) {
       if (!courtId) throw new ApiError(400, 'COURT_REQUIRED', 'コートを選択してください。');
@@ -306,6 +308,8 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     const { winnerId } = parseScore(input, match);
     const resultId = makeId('result');
     const now = nowIso();
+    // Assigned inside the transaction callback, so it travels in a holder object.
+    const bracketNotice: { current: { created: Array<{ matchId: string; round: number; roundLabel: string; playerAName: string; playerBName: string }>; bracketCompleted: boolean; phaseChanged: boolean } | null } = { current: null };
     transaction(db, () => {
       const updated = db.prepare(`UPDATE matches SET status = 'COMPLETED', score_a = ?, score_b = ?, winner_id = ?, result_id = ?,
         end_time = COALESCE(end_time, ?), updated_at = ?, row_version = row_version + 1 WHERE match_id = ? AND row_version = ?`)
@@ -318,10 +322,19 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
       db.prepare(`UPDATE match_requests SET status = 'MATCHED', matched_match_id = ?, updated_at = ?, row_version = row_version + 1
         WHERE event_id = ? AND status = 'ACTIVE' AND ((requester_id = ? AND target_player_id = ?) OR (requester_id = ? AND target_player_id = ?))`)
         .run(match.match_id, now, eventId, match.player_a_id, match.player_b_id, match.player_b_id, match.player_a_id);
+      // A bracket card advances in the same transaction, so the next round can never
+      // be left half-open by a crash between two statements.
+      const advanced = advanceBracket(db, eventId, match.match_id, req.auth?.userId ?? null);
+      if (advanced.created.length > 0 || advanced.bracketCompleted) bracketNotice.current = advanced;
     });
     const completed = getMatch(db, match.match_id);
-    audit(db, req, eventId, 'RESULT', resultId, 'ENTER', undefined, { scoreA: input.scoreA, scoreB: input.scoreB, winnerId });
-    sendData(res, completed, 201);
+    audit(db, req, eventId, 'RESULT', resultId, 'ENTER', undefined, {
+      scoreA: input.scoreA, scoreB: input.scoreB, winnerId,
+      bracket: bracketNotice.current ? {
+        created: bracketNotice.current.created, completed: bracketNotice.current.bracketCompleted, phaseChanged: bracketNotice.current.phaseChanged,
+      } : undefined,
+    });
+    sendData(res, { ...completed, bracketAdvance: bracketNotice.current }, 201);
     if (afterCompletion) queueMicrotask(() => afterCompletion(eventId));
   });
 
@@ -339,6 +352,9 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
       if (Number(changed.changes) === 0) throw new ApiError(409, 'VERSION_CONFLICT', '他の端末で結果が更新されました。');
       db.prepare(`UPDATE matches SET score_a = ?, score_b = ?, winner_id = ?, source = 'MANUAL', updated_at = ?, row_version = row_version + 1 WHERE match_id = ?`)
         .run(input.scoreA, input.scoreB, winnerId, now, match.match_id);
+      if (result.winner_id !== winnerId) {
+        retargetBracket(db, eventId, match.match_id, String(result.winner_id ?? ''), req.auth?.userId ?? null);
+      }
     });
     audit(db, req, eventId, 'RESULT', result.result_id, 'CORRECT', result, { scoreA: input.scoreA, scoreB: input.scoreB, winnerId });
     sendData(res, db.prepare('SELECT * FROM results WHERE result_id = ?').get(result.result_id));

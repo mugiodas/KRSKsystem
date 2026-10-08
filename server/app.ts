@@ -15,6 +15,7 @@ import { createAnnouncementRouter } from './routes/announcements.js';
 import { createParticipantRouter } from './routes/participant.js';
 import { createReportRouter } from './routes/report.js';
 import { createSnapshotRouter } from './routes/snapshot.js';
+import { createTournamentRouter } from './routes/tournament.js';
 import { gzipJson } from './gzip.js';
 import { maybeRunEngine } from './services/autoEngine.js';
 
@@ -44,6 +45,7 @@ export function createApp(db: DB) {
       { role: 'ADMIN', email: 'admin@krsk.local', password: 'krsk-demo', label: '運営スタッフ' },
       { role: 'VIEWER', email: 'viewer@krsk.local', password: 'krsk-demo', label: '閲覧スタッフ' },
       { role: 'PARTICIPANT', email: 'p01@demo.local', password: 'demo', label: '古谷 莉歩' },
+      { role: 'PARTICIPANT', email: 't01@demo.local', password: 'demo', label: '古谷 莉歩（トーナメントデモ）' },
     ] });
   });
 
@@ -80,6 +82,7 @@ export function createApp(db: DB) {
   app.use('/api', requireAuth, createParticipantRouter(db));
   app.use('/api', requireAuth, createReportRouter(db));
   app.use('/api', requireAuth, createSnapshotRouter(db));
+  app.use('/api', requireAuth, createTournamentRouter(db, (eventId) => maybeRunEngine(db, eventId)));
 
   const dist = resolve('dist');
   if (process.env.NODE_ENV === 'production' && existsSync(dist)) {
