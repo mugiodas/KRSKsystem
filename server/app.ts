@@ -11,6 +11,8 @@ import { createCoreRouter } from './routes/core.js';
 import { createMatchRouter } from './routes/matches.js';
 import { createRequestRouter } from './routes/requests.js';
 import { createEngineRouter } from './routes/engine.js';
+import { createAnnouncementRouter } from './routes/announcements.js';
+import { createParticipantRouter } from './routes/participant.js';
 import { maybeRunEngine } from './services/autoEngine.js';
 
 export function createApp(db: DB) {
@@ -70,6 +72,8 @@ export function createApp(db: DB) {
   app.use('/api', requireAuth, createMatchRouter(db, (eventId) => maybeRunEngine(db, eventId)));
   app.use('/api', requireAuth, createRequestRouter(db));
   app.use('/api', requireAuth, createEngineRouter(db, (eventId) => maybeRunEngine(db, eventId)));
+  app.use('/api', requireAuth, createAnnouncementRouter(db));
+  app.use('/api', requireAuth, createParticipantRouter(db));
 
   const dist = resolve('dist');
   if (process.env.NODE_ENV === 'production' && existsSync(dist)) {

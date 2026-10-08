@@ -1,6 +1,6 @@
 import type {
-  CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
-  ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
+  AnnouncementRow, CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
+  MyMatchView, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
 } from './types';
 
 export class ApiError extends Error {
@@ -117,6 +117,15 @@ export const api = {
   deleteRequest: (eventId: string, requestId: string) => call<void>('DELETE', `/events/${eventId}/requests/${requestId}`),
   suggestions: (eventId: string, participantId?: string) =>
     call<SuggestionRow[]>('GET', `/events/${eventId}/requests/suggestions${participantId ? `?participantId=${participantId}` : ''}`),
+
+  /** The participant phone's single aggregate call. */
+  myView: (eventId: string, participantId?: string | null) =>
+    call<MyMatchView>('GET', `/events/${eventId}/me${participantId ? `?participantId=${participantId}` : ''}`),
+  announcements: (eventId: string, all = false) => call<AnnouncementRow[]>('GET', `/events/${eventId}/announcements${all ? '?all=true' : ''}`),
+  createAnnouncement: (eventId: string, title: string, body: string, severity: 'INFO' | 'IMPORTANT' | 'URGENT') =>
+    call<AnnouncementRow>('POST', `/events/${eventId}/announcements`, { title, body, severity }),
+  patchAnnouncement: (eventId: string, announcementId: string, patch: Record<string, unknown>) =>
+    call<AnnouncementRow>('PATCH', `/events/${eventId}/announcements/${announcementId}`, patch),
 
   rankings: (eventId: string, classId?: string) => call<RankingRow[]>('GET', `/events/${eventId}/rankings${classId ? `?classId=${classId}` : ''}`),
   audit: (eventId: string, limit = 40) => call<Array<Record<string, unknown>>>('GET', `/events/${eventId}/audit?limit=${limit}`),

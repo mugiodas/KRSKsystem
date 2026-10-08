@@ -7,6 +7,10 @@ import { createDatabase, transaction } from '../../server/db.js';
 import { seedDatabase } from '../../server/seed.js';
 import { createApp } from '../../server/app.js';
 import { CourtLive } from '../components/dashboard/CourtLive';
+import { NextMatchCard } from '../components/participant/NextMatchCard';
+import { HistoryTab } from '../components/participant/HistoryTab';
+import { InfoTab } from '../components/participant/InfoTab';
+import type { MyMatchView } from '../api/types';
 import { MatchQueue } from '../components/dashboard/MatchQueue';
 import { ParticipantStatus } from '../components/dashboard/ParticipantStatus';
 import { buildAlerts } from '../lib/alerts';
@@ -84,5 +88,42 @@ describe('Phase 4: dashboard against the live API', () => {
     expect(html).toContain('待ち時間');
     expect(engine.evaluatedPairs).toBeGreaterThan(0);
     expect(Array.isArray(alerts)).toBe(true);
+  }, 25_000);
+
+  it('renders the participant phone screen from the same database', async () => {
+    const login = await fetch(`${base}/api/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'p01@demo.local', password: 'demo' }),
+    });
+    const view = (await login.json()) as unknown as { data: { participantId: string } };
+    const participantCookie = login.headers.getSetCookie()[0]!.split(';')[0]!;
+    const res = await fetch(`${base}/api/events/evt_demo_krsk/me`, { headers: { cookie: participantCookie } });
+    const payload = (await res.json()) as { data: MyMatchView };
+    expect(res.status).toBe(200);
+    const data = payload.data;
+    expect(data.participant.name).toBe('古谷 莉歩');
+    expect(view.data.participantId).toBe(data.participant.participantId);
+
+    const hero = renderToStaticMarkup(createElement(NextMatchCard, { view: data, nowMs: Date.now(), onEnterResult: () => undefined }));
+    const history = renderToStaticMarkup(createElement(HistoryTab, { view: data }));
+    const info = renderToStaticMarkup(createElement(InfoTab, { view: data }));
+    const html = `${hero}${history}${info}`;
+
+    // The phone answers "when do I play" with real numbers, and its history
+    // matches the stored results exactly.
+    expect(data.today.played).toBe(data.history.length);
+    expect(['あなた', '待機中'].some((word) => hero.includes(word))).toBe(true);
+    expect(['コートへ向かってください', '結果を入力', '待機中', '試合中', '休憩中です']
+      .some((decision) => hero.includes(decision))).toBe(true);
+    expect(hero).not.toContain('undefined');
+    expect(history).toContain('本日対戦した相手');
+    expect(info).toContain('大会情報');
+    if (data.nextMatch) {
+      expect(hero).toContain(data.nextMatch.opponentName);
+      if (data.nextMatch.courtName) expect(hero).toContain(data.nextMatch.courtName.replace(/[^0-9]/g, ''));
+    }
+    // No other participant's private identifiers reach the phone.
+    expect(html).not.toContain('nameKana');
+    expect(html).not.toContain('internal');
   }, 25_000);
 });

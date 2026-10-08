@@ -19,6 +19,7 @@ import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { RankingPanel } from '../components/dashboard/RankingPanel';
 import { RequestPanel } from '../components/dashboard/RequestPanel';
 import { AuditPanel } from '../components/dashboard/AuditPanel';
+import { AnnouncementsPanel } from '../components/dashboard/AnnouncementsPanel';
 import { Chip, SEVERITY_LABEL, useToast } from '../components/ui';
 import { clockTime, minutesBetween, parseIso } from '../lib/time';
 
@@ -38,7 +39,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const nowMs = useNow(1000);
   const [modal, setModal] = useState<Modal>(null);
-  const [tab, setTab] = useState<'board' | 'ranking' | 'requests' | 'audit'>('board');
+  const [tab, setTab] = useState<'board' | 'ranking' | 'requests' | 'announcements' | 'audit'>('board');
   const [selected, setSelected] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -179,6 +180,7 @@ export function DashboardPage() {
               <button aria-selected={tab === 'board'} onClick={() => setTab('board')}><Activity size={11} style={{ verticalAlign: -1 }} /> 運用ボード</button>
               <button aria-selected={tab === 'ranking'} onClick={() => setTab('ranking')}><BarChart3 size={11} style={{ verticalAlign: -1 }} /> 順位表</button>
               <button aria-selected={tab === 'requests'} onClick={() => setTab('requests')}>対戦希望</button>
+              <button aria-selected={tab === 'announcements'} onClick={() => setTab('announcements')}>お知らせ配信</button>
               {canOperate ? <button aria-selected={tab === 'audit'} onClick={() => setTab('audit')}>操作ログ</button> : null}
             </div>
             {event.autoEngineEnabled === 1 ? (
@@ -244,6 +246,7 @@ export function DashboardPage() {
           {tab === 'requests' ? (
             <RequestPanel eventId={eventId} requests={snapshot.requests} matches={snapshot.allMatches} canOperate={canOperate} onChanged={() => refresh({ silent: true })} />
           ) : null}
+          {tab === 'announcements' ? <AnnouncementsPanel eventId={eventId} canOperate={canOperate} /> : null}
           {tab === 'audit' && canOperate ? <AuditPanel eventId={eventId} /> : null}
         </div>
       </div>

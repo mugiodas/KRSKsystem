@@ -300,3 +300,42 @@ export interface LeaguePreview {
 }
 
 export interface ApiFailure { code: string; message: string }
+
+
+/* ---------- participant aggregate (GET /events/:eventId/me) ---------- */
+export interface MyNextMatch {
+  matchId: string;
+  status: 'WAITING' | 'CALLED' | 'COURT_ASSIGNED' | 'PLAYING' | 'RESULT_PENDING';
+  courtName: string | null;
+  courtNumber: number | null;
+  opponentName: string;
+  opponentClub: string;
+  scheduledTime: string | null;
+  startTime: string | null;
+  phase: 'LEAGUE' | 'REQUEST' | 'TOURNAMENT';
+  scoreA: number | null;
+  scoreB: number | null;
+  isMineSideA: boolean;
+}
+
+export interface MyMatchView {
+  participant: { participantId: string; name: string; className: string | null; club: string; rating: number; active: boolean; checkedIn: boolean };
+  event: { eventName: string; status: string; phase: string; startTime: string; endTime: string; allowRequest: boolean; defaultMatchMinutes: number };
+  today: { played: number; wins: number; losses: number; pointsFor: number; courtsUsed: number };
+  rank: { rank: number; of: number; winRate: number; pointDifference: number } | null;
+  nextMatch: MyNextMatch | null;
+  waiting: {
+    minutes: number; estimateMinutes: number | null; position: number | null; waitingCount: number;
+    restBlocked: boolean; restReadyInMinutes: number; slotMinutes: number; freeCourts: number;
+  };
+  history: Array<{ matchId: string; opponentName: string; won: boolean; scoreMine: number; scoreOpponent: number; courtName: string | null; endTime: string | null; phase: string }>;
+  otherMatches: Array<{ matchId: string; status: string; courtName: string | null; scheduledTime: string | null; opponentName: string }>;
+  requests: Array<{ requestId: string; targetName: string; requesterName: string; mine: boolean; priority: number; status: string;
+    createdAt: string; rowVersion: number; matchedStatus: string | null; matchedCourtName: string | null; matchedScheduledTime: string | null }>;
+  announcements: Array<{ title: string; body: string; severity: 'INFO' | 'IMPORTANT' | 'URGENT'; createdAt: string; actorName: string | null }>;
+}
+
+export interface AnnouncementRow {
+  announcementId: string; eventId: string; title: string; body: string;
+  severity: 'INFO' | 'IMPORTANT' | 'URGENT'; active: number; createdAt: string; actorName?: string | null;
+}
