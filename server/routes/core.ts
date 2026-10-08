@@ -6,6 +6,7 @@ import type { AuthedRequest } from '../auth.js';
 import { requireRole } from '../auth.js';
 import { ApiError, sendData } from '../http.js';
 import { normalizeName } from '../seed.js';
+import { buildLeagueProgress, leaguePlayerNumbers } from '../services/league.js';
 
 const eventModes = ['LEAGUE_REQUEST', 'REQUEST_ONLY', 'LEAGUE_TOURNAMENT_REQUEST'] as const;
 const eventStatuses = ['DRAFT', 'READY', 'RUNNING', 'PAUSED', 'COMPLETED', 'CANCELLED'] as const;
@@ -126,7 +127,7 @@ export function readEventDetail(db: DB, eventId: string) {
     (SELECT COUNT(*) FROM matches WHERE event_id = ?) AS match_count,
     (SELECT COUNT(*) FROM matches WHERE event_id = ? AND status = 'COMPLETED') AS completed_match_count
   `).get(eventId, eventId, eventId, eventId, eventId);
-  return { ...event, classes, summary };
+  return { ...event, classes, summary, league: buildLeagueProgress(db, eventId) };
 }
 
 export function readCourts(db: DB, eventId: string) {
@@ -135,14 +136,14 @@ export function readCourts(db: DB, eventId: string) {
     FROM courts c WHERE c.event_id = ? ORDER BY c.priority, c.court_number`).all(eventId));
 }
 
-export function readParticipants(db: DB, eventId: string, options: { search?: string | null; active?: number | null; classId?: string | null } = {}) {
+export function readParticipants(db: DB, eventId: string, options: { search?: string | null; active?: number | null; classId?: string | null; league?: boolean } = {}) {
   const search = options.search ? `%${options.search}%` : '%';
   const active = options.active ?? null;
   const classId = options.classId ?? null;
   // played/wins used to be two correlated COUNT subqueries per participant, which
   // cost ~45ms per poll once a 400 player event had a few hundred finished matches.
   // One pre-aggregated pass over the event's matches is the same answer, far cheaper.
-  return asRows<Record<string, any>>(db.prepare(`SELECT p.*, c.class_name,
+  const rows = asRows<Record<string, any>>(db.prepare(`SELECT p.*, c.class_name,
     COALESCE(stats.played, 0) AS played, COALESCE(stats.wins, 0) AS wins
     FROM participants p
     LEFT JOIN classes c ON c.class_id = p.class_id
@@ -162,6 +163,19 @@ export function readParticipants(db: DB, eventId: string, options: { search?: st
     ORDER BY p.active DESC, c.display_order, p.name_kana, p.name`).all(
       eventId, eventId, eventId, search, search, search, active, active, classId, classId,
     ));
+  // The league promise lives in the round-robin plan, not in a column, so the roster
+  // row carries it next to `played` and the board can show 消化/計画 without a 2nd call.
+  if (options.league) {
+    const numbers = leaguePlayerNumbers(db, eventId);
+    for (const row of rows) {
+      const value = numbers?.get(String(row.participant_id));
+      row.league_target = value?.target ?? 0;
+      row.league_played = value?.played ?? 0;
+      row.league_scheduled = value?.scheduled ?? 0;
+      row.league_shortfall = value?.shortfall ?? 0;
+    }
+  }
+  return rows;
 }
 
 export function createCoreRouter(db: DB): Router {
@@ -296,6 +310,7 @@ export function createCoreRouter(db: DB): Router {
       search: typeof req.query.search === 'string' ? req.query.search.trim() : null,
       active: req.query.active === undefined ? null : req.query.active === 'true' ? 1 : 0,
       classId: typeof req.query.classId === 'string' ? req.query.classId : null,
+      league: true,
     });
     if (req.auth?.role === 'PARTICIPANT') {
       const safeRows = rows.map((row) => {

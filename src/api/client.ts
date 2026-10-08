@@ -1,6 +1,7 @@
 import type {
   AnnouncementRow, CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
   EventReport, EventSnapshot, IntegrityReport, MyMatchView, TournamentBracket, TournamentGenerated, TournamentPreview, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
+  LeagueProgress,
 } from './types';
 
 export class ApiError extends Error {
@@ -110,6 +111,7 @@ export const api = {
   engineExplain: (eventId: string, matchId?: string) =>
     call<ExplainResponse>('GET', `/events/${eventId}/engine/explain${matchId ? `?matchId=${matchId}` : ''}`),
 
+  leagueProgress: (eventId: string) => call<LeagueProgress>('GET', `/events/${eventId}/league/progress`),
   leaguePreview: (eventId: string, classIds?: string[]) => call<LeaguePreview>('POST', `/events/${eventId}/league/preview`, { classIds }),
   leagueGenerate: (eventId: string, classIds?: string[]) =>
     call<{ createdCount: number; skippedDuplicate: number; skippedEndTime: number }>('POST', `/events/${eventId}/league/generate`, { classIds }),

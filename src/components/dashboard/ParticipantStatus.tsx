@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import type { EngineState, MatchRow, ParticipantRow, RequestRow } from '../../api/types';
 import { Chip, Empty } from '../ui';
 
-type SortKey = 'waiting' | 'played' | 'name' | 'rating';
+type SortKey = 'waiting' | 'played' | 'league' | 'name' | 'rating';
 
 interface Props {
   participants: ParticipantRow[];
@@ -65,6 +65,9 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
     const compare: Record<SortKey, (a: typeof mapped[0], b: typeof mapped[0]) => number> = {
       waiting: (a, b) => b.waitingMinutes - a.waitingMinutes || a.player.played - b.player.played,
       played: (a, b) => a.player.played - b.player.played || b.waitingMinutes - a.waitingMinutes,
+      // Who is furthest from the league promise, and who has the least time to fix it.
+      league: (a, b) => (b.player.leagueShortfall ?? 0) - (a.player.leagueShortfall ?? 0)
+        || (b.player.leagueTarget ?? 0) - (a.player.leagueTarget ?? 0) || b.waitingMinutes - a.waitingMinutes,
       name: (a, b) => a.player.name.localeCompare(b.player.name, 'ja'),
       rating: (a, b) => b.player.rating - a.player.rating,
     };
@@ -72,6 +75,8 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
   }, [participants, engine, matches, requests, query, sort, onlyActive]);
 
   const waitingTotal = rows.filter((row) => !row.busy && row.waitingMinutes > 0).length;
+  const hasLeague = participants.some((player) => (player.leagueTarget ?? 0) > 0);
+  const underTarget = participants.filter((player) => (player.leagueShortfall ?? 0) > 0).length;
   const playing = rows.filter((row) => row.busy).length;
 
   return (
@@ -81,6 +86,7 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
         <Chip>{rows.length}名</Chip>
         <Chip tone="blue">{playing}名 プレー中</Chip>
         <Chip tone={waitingTotal > 8 ? 'warn' : ''}>待機 {waitingTotal}名</Chip>
+        {hasLeague ? <Chip tone={underTarget > 0 ? 'warn' : 'ok'}>リーグ計画 未消化 {underTarget}名</Chip> : null}
         <span className="spacer" />
         <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
           <input type="checkbox" checked={onlyActive} onChange={(event) => setOnlyActive(event.target.checked)} style={{ margin: 0 }} />
@@ -91,7 +97,8 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="名前・所属" />
         </div>
         <div className="tabs">
-          {([['waiting', '待ち時間'], ['played', '試合数'], ['rating', 'レーティング'], ['name', '五十音']] as const).map(([key, label]) => (
+          {([['waiting', '待ち時間'], ['played', '試合数'], ...(hasLeague ? ([['league', '消化不足']] as const) : []),
+            ['rating', 'レーティング'], ['name', '五十音']] as const).map(([key, label]) => (
             <button key={key} aria-selected={sort === key} onClick={() => setSort(key)}>{label}</button>
           ))}
         </div>
@@ -105,6 +112,7 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
                 <th>名前</th>
                 <th style={{ width: 58 }}>クラス</th>
                 <th className="right" style={{ width: 58 }}>試合</th>
+                {hasLeague ? <th className="right" style={{ width: 66 }}>リーグ</th> : null}
                 <th className="right" style={{ width: 46 }}>勝</th>
                 <th className="right" style={{ width: 58 }}>レート</th>
                 <th style={{ width: 128 }}>待ち時間</th>
@@ -131,6 +139,14 @@ export function ParticipantStatus({ participants, engine, matches, requests, sel
                     </td>
                     <td className="muted">{player.className ?? '—'}</td>
                     <td className="right num">{player.played}</td>
+                    {hasLeague ? (
+                      <td className="right num" title={`リーグ計画 ${player.leagueTarget ?? 0}試 / 消化 ${player.leaguePlayed ?? 0}試${(player.leagueScheduled ?? 0) > 0 ? ` + 予定 ${(player.leagueScheduled ?? 0)}試` : ''}`}>
+                        <span style={{ color: (player.leagueShortfall ?? 0) > 0 ? 'var(--warn)' : 'var(--ok, var(--navy-800))', fontWeight: (player.leagueShortfall ?? 0) > 0 ? 700 : 400 }}>
+                          {player.leaguePlayed ?? 0}/{player.leagueTarget ?? 0}
+                        </span>
+                        {(player.leagueScheduled ?? 0) > 0 ? <span className="muted" style={{ fontSize: 10 }}>+{player.leagueScheduled}</span> : null}
+                      </td>
+                    ) : null}
                     <td className="right num">{player.wins}</td>
                     <td className="right num muted">{player.rating}</td>
                     <td>

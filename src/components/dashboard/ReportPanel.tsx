@@ -107,6 +107,9 @@ export function ReportPanel({ eventId }: { eventId: string }) {
           <Kpi label="希望充足率" value={pct(report.requests.fulfillmentRate)} note={`${report.requests.matched}/${report.requests.total}件が成立`} tone={report.requests.total > 0 && report.requests.fulfillmentRate < 0.6 ? 'warn' : 'ok'} />
           <Kpi label="ノーショー" value={String(report.noShows.count)} note={`影響 ${report.noShows.affectedPlayers}名 / 比率 ${pct(report.noShows.rate)}`} tone={report.noShows.count > 0 ? 'warn' : 'ok'} />
           <Kpi label="自動採番" value={pct(report.automation.autoShare)} note={`自動 ${report.automation.createdAuto} / 手動 ${report.automation.createdManual}`} />
+          <Kpi label="リーグ消化率" value={pct(report.league.completionRate)}
+            note={`${report.league.completedMatches}/${report.league.plannedMatches}試 ・ ${report.league.roundsFinished}/${report.league.roundsPlanned}回戦`}
+            tone={report.league.status === 'WONT_FIT' ? 'warn' : report.league.status === 'BEHIND' ? 'warn' : 'ok'} />
           <Kpi label="結果の確定率" value={pct(report.confirmations.confirmRate)}
             note={`確定待ち ${report.confirmations.entered + report.confirmations.disputed} / 不一致 ${report.confirmations.disputed}`}
             tone={report.confirmations.disputed > 0 ? 'warn' : report.confirmations.confirmRate >= 0.95 ? 'ok' : 'plain'} />
@@ -150,6 +153,42 @@ export function ReportPanel({ eventId }: { eventId: string }) {
             ))}
             <p className="muted report-note">稼働率 = コートが埋まっていた時間 / 使用可能時間</p>
           </div>
+
+          {report.league.applicable ? (
+            <div className="report-block">
+              <h4>リーグ消化</h4>
+              <dl className="report-dl">
+                <div><dt>計画試合数</dt><dd>{report.league.plannedMatches}試</dd></div>
+                <div><dt>消化（完了）</dt>
+                  <dd className={report.league.completedMatches < report.league.plannedMatches ? 'danger' : ''}>
+                    {report.league.completedMatches}試・{Math.round(report.league.completionRate * 100)}%</dd></div>
+                <div><dt>開催中・予定</dt><dd>{report.league.inFlightMatches}試</dd></div>
+                <div><dt>1人平均</dt><dd>{report.league.perPlayer.avg}試（最少 {report.league.perPlayer.min} / 最多 {report.league.perPlayer.max}・計画 {report.league.perPlayer.target}）</dd></div>
+                <div><dt>計画未消化</dt>
+                  <dd className={report.league.playersUnderTarget > 0 ? 'danger' : ''}>
+                    {report.league.playersUnderTarget}名（最大 {report.league.mostMissing}試不足）</dd></div>
+              </dl>
+              {report.league.shortfalls.length > 0 ? (
+                <table className="report-table is-mini">
+                  <thead><tr><th>選手</th><th>クラス</th><th className="right">消化</th><th className="right">計画</th><th className="right">不足</th></tr></thead>
+                  <tbody>
+                    {report.league.shortfalls.slice(0, 12).map((row) => (
+                      <tr key={`${row.name}-${row.className}`}>
+                        <td>{row.name}</td><td className="muted">{row.className}</td>
+                        <td className="right num">{row.played}</td><td className="right num">{row.target}</td>
+                        <td className="right num danger">-{row.shortfall}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p className="report-ok">全選手がリーグ計画を消化しています。</p>}
+              <p className="muted report-note">
+                計画は大会設定のラウンドロビン（{report.league.status === 'NOT_APPLICABLE' ? '未設定' : '消化状況'}）から算出。
+                必要 {report.league.minutesNeeded}分 / 残り {report.league.minutesRemaining}分の見込みで、未消化は
+                ノーショー・取消・コート不足が要因です。
+              </p>
+            </div>
+          ) : null}
 
           <div className="report-block">
             <h4>結果の確定</h4>

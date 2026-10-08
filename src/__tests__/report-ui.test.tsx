@@ -33,6 +33,16 @@ const report = {
   fairness: { playedStdDev: 1.4, balanceScore: 0.46, mostPlayed: '古谷 莉歩（7試合）', leastPlayed: '森 悠人（2試合）' },
   automation: { autoEngine: true, autoCourt: true, createdAuto: 8, createdManual: 1, autoShare: 0.89 },
   noShows: { count: 1, affectedPlayers: 2, rate: 0.11 },
+  league: {
+    applicable: true, status: 'BEHIND', plannedMatches: 10, completedMatches: 7, inFlightMatches: 1,
+    completionRate: 0.7, roundsPlanned: 5, roundsFinished: 3,
+    perPlayer: { avg: 2.33, min: 1, max: 4, target: 3 }, playersUnderTarget: 2, mostMissing: 2,
+    minutesNeeded: 120, minutesRemaining: 96,
+    shortfalls: [
+      { name: '森 悠人', className: 'Bクラス', target: 3, played: 1, shortfall: 2 },
+      { name: '古谷 莉歩', className: 'Aクラス', target: 3, played: 2, shortfall: 1 },
+    ],
+  },
   confirmations: { total: 8, confirmed: 6, corrected: 1, entered: 1, disputed: 0, autoConfirmed: 2,
     byPlayers: 5, pendingMatches: 1, avgConfirmMinutes: 1.8, confirmRate: 0.875 },
   integrity: { eventId: 'evt_1', checkedAt: '2026-04-11T09:00:00.000Z', checks: 20, violations: [], clean: true },
@@ -120,6 +130,12 @@ describe('大会レポート画面', () => {
     expect(text).toContain('88%');
     expect(text).toContain('7/8件');
     expect(text).toContain('1.8分');
+    // League digestion is reported against the event's own round-robin plan.
+    expect(text).toContain('リーグ消化');
+    expect(text).toContain('7/10試');
+    expect(text).toContain('70%');
+    expect(text).toContain('2名（最大 2試不足）');
+    expect(text).toContain('森 悠人');
   });
 
   it('highlights the players the operators should act on', async () => {

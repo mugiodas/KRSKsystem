@@ -133,7 +133,7 @@ describe('Phase 6: event report', () => {
     // src/api/types.ts mirrors this shape by hand, so an accidental rename has to fail here.
     expect(Object.keys(report).sort()).toEqual([
       'automation', 'confirmations', 'courts', 'eventDate', 'eventId', 'eventMode', 'eventName',
-      'fairness', 'generatedAt', 'integrity', 'matchCount', 'matches', 'noShows', 'participants',
+      'fairness', 'generatedAt', 'integrity', 'league', 'matchCount', 'matches', 'noShows', 'participants',
       'phase', 'requests', 'rows', 'standings', 'status', 'tournament', 'venue', 'waiting', 'window',
     ]);
     expect(Object.keys(report.courts).sort()).toEqual(['availableMinutes', 'busyMinutes', 'count', 'perCourt', 'utilization']);
@@ -145,6 +145,14 @@ describe('Phase 6: event report', () => {
       'requestFulfilled', 'totalWaitingMinutes', 'winRate', 'wins', 'losses',
     ].sort());
     expect(report.integrity).toMatchObject({ checks: 20, clean: true, violations: [] });
+    expect(Object.keys(report.league).sort()).toEqual([
+      'applicable', 'completionRate', 'completedMatches', 'inFlightMatches', 'minutesNeeded', 'minutesRemaining',
+      'mostMissing', 'perPlayer', 'playersUnderTarget', 'plannedMatches', 'roundsFinished', 'roundsPlanned',
+      'shortfalls', 'status',
+    ].sort());
+    // This fixture is REQUEST_ONLY with nobody checked in: no promise, no shortfall.
+    expect(report.league).toMatchObject({ applicable: false, status: 'NOT_APPLICABLE', plannedMatches: 0 });
+    expect(report.league.shortfalls).toEqual([]);
     expect(report.courts.perCourt[0]).toHaveProperty('courtName');
     expect(Object.keys(report.confirmations).sort()).toEqual([
       'autoConfirmed', 'avgConfirmMinutes', 'byPlayers', 'confirmed', 'confirmRate', 'corrected',

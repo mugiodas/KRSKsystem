@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { asRow, asRows } from '../db.js';
 import { ApiError } from '../http.js';
 import { runIntegrityChecks } from './integrity.js';
+import { buildLeagueProgress } from './league.js';
 
 interface MatchTimeRow {
   match_id: string; player_a_id: string; player_b_id: string; court_id: string | null;
@@ -61,6 +62,13 @@ export interface EventReport {
     autoConfirmed: number; byPlayers: number; pendingMatches: number; avgConfirmMinutes: number | null;
     confirmRate: number;
   };
+  league: {
+    applicable: boolean; status: string; plannedMatches: number; completedMatches: number; inFlightMatches: number;
+    completionRate: number; roundsPlanned: number; roundsFinished: number;
+    perPlayer: { avg: number; min: number; max: number; target: number };
+    playersUnderTarget: number; mostMissing: number; minutesNeeded: number; minutesRemaining: number;
+    shortfalls: Array<{ name: string; className: string; target: number; played: number; shortfall: number }>;
+  };
   tournament: {
     brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
     byClass: Array<{ classId: string; className: string; size: number; rounds: number; status: string; winner: string | null }>;
@@ -77,6 +85,34 @@ export interface EventReport {
  * a confirmation took, and anything still waiting for a tap. Every number is read from
  * `results`, so an unconfirmed report is never counted as a played match.
  */
+/**
+ * League digestion: promised cards vs played cards. The event's own plan is the
+ * yardstick (round robin sliced by league_type / league_match_count), so a class
+ * that was only ever scheduled for 3 rounds is not reported as 1 round short.
+ */
+function buildLeagueSection(db: DB, eventId: string, nowMs: number) {
+  const progress = buildLeagueProgress(db, eventId, { detail: true, nowMs });
+  return {
+    applicable: progress.applicable,
+    status: progress.status,
+    plannedMatches: progress.plannedMatches,
+    completedMatches: progress.completedMatches,
+    inFlightMatches: progress.inFlightMatches,
+    completionRate: progress.completionRate,
+    roundsPlanned: progress.classes.reduce((sum, entry) => sum + entry.roundsPlanned, 0),
+    roundsFinished: progress.classes.reduce((sum, entry) => sum + entry.roundsFinished, 0),
+    perPlayer: progress.perPlayer,
+    playersUnderTarget: progress.playersUnderTarget,
+    mostMissing: progress.mostMissing,
+    minutesNeeded: progress.minutesNeeded,
+    minutesRemaining: progress.minutesRemaining,
+    shortfalls: progress.shortfalls.map((player) => ({
+      name: player.name, className: player.className, target: player.target,
+      played: player.played + player.scheduled, shortfall: player.shortfall,
+    })),
+  };
+}
+
 function buildConfirmationSection(db: DB, eventId: string) {
   const totals = db.prepare(`SELECT
       COUNT(*) AS total,
@@ -450,6 +486,7 @@ export function buildEventReport(db: DB, eventId: string): EventReport {
       rate: matchRows.length === 0 ? 0 : Number((noShowMatches / matchRows.length).toFixed(3)),
     },
     confirmations: buildConfirmationSection(db, eventId),
+    league: buildLeagueSection(db, eventId, Date.now()),
     tournament: buildTournamentSection(db, eventId),
     integrity: runIntegrityChecks(db, eventId),
     standings,
@@ -480,6 +517,12 @@ export function reportToCsv(report: EventReport): string {
     lines.push(`確定待ち,${report.confirmations.entered}件（申告不一致 ${report.confirmations.disputed}件）`);
   }
   if (report.tournament.champion) lines.push(`優勝,${esc(report.tournament.champion.name)}`);
+  if (report.league.applicable) {
+    lines.push(`リーグ消化,${report.league.completedMatches}/${report.league.plannedMatches}試合（${Math.round(report.league.completionRate * 100)}%）・${report.league.roundsFinished}/${report.league.roundsPlanned}回戦`);
+    if (report.league.playersUnderTarget > 0) {
+      lines.push(`リーグ未消化,${report.league.playersUnderTarget}名（最大 ${report.league.mostMissing}試不足・所要 ${report.league.minutesNeeded}分 / 残り ${report.league.minutesRemaining}分）`);
+    }
+  }
   lines.push(`平均待機時間(分),${esc(report.waiting.avgMinutes)}`);
   lines.push(`最大待機時間(分),${esc(report.waiting.maxMinutes)}`);
   lines.push(`レポート時点の待機(分),${esc(report.waiting.longestIdleMinutes)}`);
@@ -503,6 +546,14 @@ export function reportToCsv(report: EventReport): string {
       lines.push([esc(entry.className), esc(entry.classId), entry.size, entry.rounds, esc(entry.status), esc(entry.winner)].join(','));
     }
   }
+  if (report.league.applicable && report.league.shortfalls.length > 0) {
+    lines.push('');
+    lines.push('リーグ未消化,選手名,クラス,計画,消化,不足');
+    for (const entry of report.league.shortfalls) {
+      lines.push([`${entry.shortfall}試`, esc(entry.name), esc(entry.className), entry.target, entry.played, entry.shortfall].join(','));
+    }
+  }
+  lines.push('');
   lines.push('コート,試合数,稼働分,稼働率');
   for (const court of report.courts.perCourt) {
     lines.push([esc(court.courtName), court.matches, court.busyMinutes, court.utilization].join(','));

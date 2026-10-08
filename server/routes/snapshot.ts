@@ -43,7 +43,7 @@ export function createSnapshotRouter(db: DB): Router {
       courts: readCourts(db, eventId),
       matches: recent,
       allMatches,
-      participants: readParticipants(db, eventId),
+      participants: readParticipants(db, eventId, { league: true }),
       requests: readRequests(db, eventId),
       engine: buildEngineState(db, eventId, { light: true }),
     });

@@ -7,7 +7,7 @@ export interface DashboardAlert {
   id: string;
   severity: AlertSeverity;
   kind: 'MISSING_RESULT' | 'RESULT_UNCONFIRMED' | 'RESULT_DISPUTED' | 'LONG_WAIT' | 'IDLE_COURT' | 'DELAY'
-    | 'NO_SHOW' | 'UNDER_MATCHED' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
+    | 'NO_SHOW' | 'UNDER_MATCHED' | 'LEAGUE_BEHIND' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
   title: string;
   detail: string;
   /** Deep link target so the operator can act from the alert itself. */
@@ -159,10 +159,35 @@ export function buildAlerts(input: {
     });
   }
 
-  // 6) Someone who has barely played while the event is well underway.
+  // 6) The league plan. The event's own round robin says how many cards each player was
+  //    promised, so a shortfall is only reported against that promise - and cards that
+  //    already exist (queued or in play) count towards it, because the operator does not
+  //    need a second warning for a match that is already on the board.
   const startedMs = parseIso(event.startTime) ?? nowMs;
   const elapsed = minutesBetween(startedMs, nowMs);
-  if (elapsed > 45) {
+  const league = event.league;
+  if (league?.applicable && event.status === 'RUNNING' && league.status !== 'ON_TRACK') {
+    const short = participants
+      .filter((player) => (player.leagueShortfall ?? 0) > 0)
+      .sort((left, right) => (right.leagueShortfall ?? 0) - (left.leagueShortfall ?? 0));
+    const names = short.slice(0, 4)
+      .map((player) => `${player.name} ${player.leaguePlayed ?? 0}/${player.leagueTarget ?? 0}試`).join('、');
+    alerts.push({
+      id: 'league-behind',
+      severity: league.status === 'WONT_FIT' ? 'URGENT' : 'IMPORTANT',
+      kind: 'LEAGUE_BEHIND',
+      title: league.status === 'WONT_FIT'
+        ? `リーグの計画が残り時間で消化できません（${league.playersUnderTarget}名・最大 ${league.mostMissing}試不足）`
+        : `リーグが計画より遅れています（${league.completedMatches}/${league.plannedMatches}試消化）`,
+      detail: [
+        `必要 ${league.minutesNeeded}分 / 残り ${league.minutesRemaining}分`,
+        league.courtCount > 0 ? `${league.courtCount}コート・1回戦 約${league.slotMinutes}分` : '',
+        names,
+      ].filter(Boolean).join(' ・ '),
+      participantIds: short.map((player) => player.participantId),
+    });
+  } else if (!league?.applicable && elapsed > 45) {
+    // No league plan to fall behind on, so fall back to the crude "still at zero" rule.
     const idle = participants.filter((player) => player.active === 1 && player.checkedIn === 1 && player.played === 0);
     if (idle.length > 0) {
       alerts.push({

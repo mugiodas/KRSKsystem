@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarClock, Loader2, Wand2 } from 'lucide-react';
 import { api, ApiError } from '../../api/client';
-import type { LeaguePreview } from '../../api/types';
+import type { LeaguePreview, LeagueProgress } from '../../api/types';
 import { clockTime } from '../../lib/time';
 import { Chip, Empty, Modal, useToast } from '../ui';
 
@@ -20,6 +20,7 @@ interface Props {
 export function LeagueModal({ eventId, canOperate, endTime, onClose, onGenerated }: Props) {
   const toast = useToast();
   const [preview, setPreview] = useState<LeaguePreview | null>(null);
+  const [progress, setProgress] = useState<LeagueProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +30,9 @@ export function LeagueModal({ eventId, canOperate, endTime, onClose, onGenerated
     setLoading(true);
     setError(null);
     try {
-      setPreview(await api.leaguePreview(eventId));
+      const [nextPreview, nextProgress] = await Promise.all([api.leaguePreview(eventId), api.leagueProgress(eventId)]);
+      setPreview(nextPreview);
+      setProgress(nextProgress);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'プレビューの生成に失敗しました。');
     } finally {
@@ -82,6 +85,7 @@ export function LeagueModal({ eventId, canOperate, endTime, onClose, onGenerated
       {error ? <div className="notice error">{error}</div> : null}
       {loading ? <Empty>ラウンドロビンを計算しています…</Empty> : !preview ? <Empty>プレビューを作成できませんでした。</Empty> : (
         <>
+          {progress && progress.applicable ? <LeagueProgressBox progress={progress} /> : null}
           <div className="kv">
             <div><dt>参加者</dt><dd>{preview.summary.participantCount}</dd></div>
             <div><dt>クラス数</dt><dd>{preview.summary.classCount}</dd></div>
@@ -135,5 +139,65 @@ export function LeagueModal({ eventId, canOperate, endTime, onClose, onGenerated
         </>
       )}
     </Modal>
+  );
+}
+
+const fmtMinutes = (value: number) => (value >= 60 ? `${Math.floor(value / 60)}時間${Math.round(value % 60)}分` : `${Math.round(value)}分`);
+
+/**
+ * Plan vs reality for the league phase, straight from the same round-robin slicing the
+ * generator uses. Generation is only half the job: the operator also needs to know
+ * whether the promised cards can still be played before the hall closes.
+ */
+function LeagueProgressBox({ progress }: { progress: LeagueProgress }) {
+  const roundsPlanned = progress.classes.reduce((sum, entry) => sum + entry.roundsPlanned, 0);
+  const roundsFinished = progress.classes.reduce((sum, entry) => sum + entry.roundsFinished, 0);
+  const listed = progress.shortfalls.slice(0, 8);
+  const tone = progress.status === 'WONT_FIT' ? 'urgent' : progress.status === 'BEHIND' ? 'warn' : 'ok';
+  return (
+    <div className="league-progress">
+      <div className="league-progress-head">
+        <div>
+          <span className="label">いまの消化</span>
+          <span className="num big">{progress.completedMatches}/{progress.plannedMatches}試</span>
+          <span className="muted">
+            {Math.round(progress.completionRate * 100)}% ・ {roundsFinished}/{roundsPlanned}回戦完了 ・
+            {progress.courtCount}コート ・ 1回戦 約{fmtMinutes(progress.slotMinutes)}
+          </span>
+        </div>
+        <Chip tone={tone}>
+          {progress.status === 'ON_TRACK' ? '計画どおり'
+            : progress.status === 'BEHIND' ? `計画より ${progress.roundsOutstanding}回戦 遅れ`
+              : '残り時間で消化しきれない'}
+        </Chip>
+      </div>
+      <div className="league-progress-bar"><i style={{ width: `${Math.min(100, progress.completionRate * 100)}%` }} /></div>
+      {progress.playersUnderTarget > 0 ? (
+        <div className="league-shortfall">
+          <b>計画に届いていない選手 {progress.playersUnderTarget}名</b>
+          <ul>
+            {listed.map((row) => (
+              <li key={row.participantId}>
+                <span className="name">{row.name}</span>
+                <span className="muted">{row.className}</span>
+                <span className="num">{row.played + row.scheduled}/{row.target}試</span>
+                <span className="miss">不足 {row.shortfall}試</span>
+              </li>
+            ))}
+          </ul>
+          {progress.shortfalls.length > listed.length ? (
+            <span className="muted">他 {progress.shortfalls.length - listed.length}名</span>
+          ) : null}
+          <p className="hint">
+            必要 {fmtMinutes(progress.minutesNeeded)} / 残り {fmtMinutes(progress.minutesRemaining)}。
+            {progress.status === 'WONT_FIT'
+              ? ' コートを増やす、設定で計画試数を減らす、またはリーグ戦をここで終了して対戦希望に切り替えてください。'
+              : ' 自動マッチングは試合数の少ない選手を優遇してカードを作りますが、計画自体を変えるには設定の「リーグ戦試数」を調整してください。'}
+          </p>
+        </div>
+      ) : (
+        <p className="hint">全選手の計画消化が揃っています（作成済みまたは予定のカードを含めて {progress.plannedMatches}試）。</p>
+      )}
+    </div>
   );
 }

@@ -35,6 +35,58 @@ export interface EventClass {
   rowVersion: number;
 }
 
+/** League plan per class, as the round-robin generator would slice it. */
+export interface LeagueClassProgress {
+  classId: string;
+  className: string;
+  size: number;
+  roundsPlanned: number;
+  pairsPlanned: number;
+  minutesPlanned: number;
+  minutesPerRound: number;
+  completed: number;
+  inFlight: number;
+  cancelled: number;
+  roundsFinished: number;
+  playersUnderTarget: number;
+  worstShortfall: number;
+}
+
+export interface LeagueShortfallRow {
+  participantId: string;
+  name: string;
+  className: string;
+  target: number;
+  played: number;
+  scheduled: number;
+  shortfall: number;
+}
+
+export interface LeagueProgress {
+  status: 'NOT_APPLICABLE' | 'ON_TRACK' | 'BEHIND' | 'WONT_FIT';
+  applicable: boolean;
+  phase: string;
+  leagueType: 'FULL_ROUND_ROBIN' | 'LIMITED_ROUND_ROBIN';
+  matchCountSetting: number;
+  courtCount: number;
+  slotMinutes: number;
+  classCount: number;
+  playerCount: number;
+  plannedMatches: number;
+  completedMatches: number;
+  inFlightMatches: number;
+  completionRate: number;
+  perPlayer: { avg: number; min: number; max: number; target: number };
+  playersUnderTarget: number;
+  mostMissing: number;
+  roundsOutstanding: number;
+  minutesNeeded: number;
+  minutesRemaining: number;
+  classes: LeagueClassProgress[];
+  /** Only the detail endpoint fills this in; the poll carries the aggregate. */
+  shortfalls: LeagueShortfallRow[];
+}
+
 export interface EventDetail extends Omit<EventSummary, 'participantCount' | 'courtCount' | 'matchCount' | 'completedMatchCount'> {
   defaultMatchMinutes: number;
   minimumRestMinutes: number;
@@ -69,6 +121,8 @@ export interface EventDetail extends Omit<EventSummary, 'participantCount' | 'co
     participantCount: number; checkedInCount: number; courtCount: number;
     matchCount: number; completedMatchCount: number;
   };
+  /** League plan vs reality, recomputed on every poll. */
+  league?: LeagueProgress;
 }
 
 export interface ParticipantRow {
@@ -87,6 +141,11 @@ export interface ParticipantRow {
   checkedIn: number;
   played: number;
   wins: number;
+  /** League promise and digestion (0 when the event has no league phase). */
+  leagueTarget?: number;
+  leaguePlayed?: number;
+  leagueScheduled?: number;
+  leagueShortfall?: number;
   rowVersion: number;
   updatedAt: string;
 }
@@ -521,6 +580,13 @@ export interface EventReport {
   fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
   automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
   noShows: { count: number; affectedPlayers: number; rate: number };
+  league: {
+    applicable: boolean; status: string; plannedMatches: number; completedMatches: number; inFlightMatches: number;
+    completionRate: number; roundsPlanned: number; roundsFinished: number;
+    perPlayer: { avg: number; min: number; max: number; target: number };
+    playersUnderTarget: number; mostMissing: number; minutesNeeded: number; minutesRemaining: number;
+    shortfalls: Array<{ name: string; className: string; target: number; played: number; shortfall: number }>;
+  };
   confirmations: {
     total: number; confirmed: number; corrected: number; entered: number; disputed: number;
     autoConfirmed: number; byPlayers: number; pendingMatches: number; avgConfirmMinutes: number | null; confirmRate: number;

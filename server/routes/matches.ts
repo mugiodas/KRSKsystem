@@ -5,7 +5,7 @@ import { asRow, asRows, makeId, nowIso, pairKey, transaction } from '../db.js';
 import { requireRole, type AuthedRequest } from '../auth.js';
 import { ApiError, sendData } from '../http.js';
 import { audit, ensureEventAccess, requireEvent } from './core.js';
-import { buildLeaguePreview } from '../services/league.js';
+import { buildLeaguePreview, buildLeagueProgress } from '../services/league.js';
 import { assertBracketTerminable, retargetBracket } from '../services/tournament.js';
 import { confirmEnteredResult, confirmStaleResults, disputeResult, submitResult, type ResultActor } from '../services/results.js';
 import { calculateRankings } from '../services/ranking.js';
@@ -157,6 +157,19 @@ export function createMatchRouter(db: DB, afterCompletion?: (eventId: string) =>
     requireEvent(db, param(req, 'eventId'));
     const { classIds } = z.object({ classIds: z.array(z.string()).optional() }).parse(req.body ?? {});
     sendData(res, buildLeaguePreview(db, param(req, 'eventId'), classIds));
+  });
+
+  /**
+   * How much of the league plan is on the board, and whether the remaining rounds
+   * still fit before the end time. Staff also get the list of players who are short;
+   * participants only see the aggregate, so no roster detail leaks through it.
+   */
+  router.get('/events/:eventId/league/progress', (req: AuthedRequest, res: Response) => {
+    const eventId = param(req, 'eventId');
+    ensureEventAccess(db, req, eventId);
+    requireEvent(db, eventId);
+    const staff = ['OWNER', 'ADMIN', 'VIEWER'].includes(String(req.auth?.role));
+    sendData(res, buildLeagueProgress(db, eventId, { detail: staff }));
   });
 
   router.post('/events/:eventId/league/generate', requireRole('OWNER', 'ADMIN'), (req: AuthedRequest, res: Response) => {
