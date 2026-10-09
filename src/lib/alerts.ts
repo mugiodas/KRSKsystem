@@ -3,17 +3,25 @@ import { minutesBetween, parseIso } from './time';
 
 export type AlertSeverity = 'URGENT' | 'IMPORTANT' | 'INFO';
 
+/** How close to the end time the closing notice becomes worth sending. */
+export const CLOSING_NOTICE_WINDOW_MINUTES = 30;
+
+/** Which one-click notice the alert offers (`ANNOUNCEMENTS` panel). */
+export type QuickBroadcast = 'CLOSING' | 'RESULTS' | 'UNCONFIRMED';
+
 export interface DashboardAlert {
   id: string;
   severity: AlertSeverity;
   kind: 'MISSING_RESULT' | 'RESULT_UNCONFIRMED' | 'RESULT_DISPUTED' | 'LONG_WAIT' | 'IDLE_COURT' | 'DELAY'
-    | 'NO_SHOW' | 'UNDER_MATCHED' | 'LEAGUE_BEHIND' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
+    | 'NO_SHOW' | 'UNDER_MATCHED' | 'LEAGUE_BEHIND' | 'CLOSING_SOON' | 'TIME_PROTECTED' | 'ENGINE_OFF' | 'REQUEST_WAITING';
   title: string;
   detail: string;
   /** Deep link target so the operator can act from the alert itself. */
   matchId?: string;
   courtId?: string;
   participantIds?: string[];
+  /** Set when the fix is a broadcast: the panel opens ready to send this. */
+  quick?: QuickBroadcast;
 }
 
 const ACTIVE = ['CALLED', 'COURT_ASSIGNED', 'PLAYING', 'RESULT_PENDING'];
@@ -62,6 +70,7 @@ export function buildAlerts(input: {
           detail: `${match.playerAName} × ${match.playerBName}／運営がスコアを決めてください`,
           matchId: match.matchId,
           courtId: match.courtId ?? undefined,
+          quick: 'UNCONFIRMED',
         });
         return;
       }
@@ -72,6 +81,7 @@ export function buildAlerts(input: {
           id: `unconfirmed-${match.matchId}`,
           severity: waited > confirmTimeout * 2 ? 'URGENT' : 'IMPORTANT',
           kind: 'RESULT_UNCONFIRMED',
+        quick: 'UNCONFIRMED',
           title: '確定されない結果が待っています',
           detail: `${match.playerAName} × ${match.playerBName}／申告 ${claim ?? '—'} が ${Math.round(waited)}分そのまま（コート確保中）`,
           matchId: match.matchId,
@@ -84,6 +94,7 @@ export function buildAlerts(input: {
           id: `result-${match.matchId}`,
           severity: waited > 10 ? 'URGENT' : 'IMPORTANT',
           kind: 'MISSING_RESULT',
+          quick: 'RESULTS',
           title: '結果が未入力です',
           detail: `${match.courtName ?? 'コート未定'} ${match.playerAName} × ${match.playerBName}／終了 ${Math.round(waited)}分前`,
           matchId: match.matchId,
@@ -209,6 +220,24 @@ export function buildAlerts(input: {
       kind: 'TIME_PROTECTED',
       title: '終了時刻保護のため新規試合は作成していません',
       detail: `残り ${Math.max(0, Math.round(engine.remainingMinutes))}分・1試合枠 ${engine.matchSlotMinutes}分`,
+      quick: 'CLOSING',
+    });
+  }
+
+  // 7b) The last half hour. The hall hears about the closing time from the
+  //     broadcast, not from an empty court list, so offer the notice here.
+  const endMs = parseIso(event.endTime);
+  const remainingMinutes = endMs === null ? Number.POSITIVE_INFINITY : minutesBetween(nowMs, endMs);
+  const openCards = matches.filter((match) => ACTIVE.includes(match.status) || match.status === 'WAITING').length;
+  if (!engine?.timeProtected && event.status === 'RUNNING' && Number.isFinite(remainingMinutes)
+    && remainingMinutes > 0 && remainingMinutes <= CLOSING_NOTICE_WINDOW_MINUTES && openCards > 0) {
+    alerts.push({
+      id: 'closing-soon',
+      severity: remainingMinutes <= 10 ? 'IMPORTANT' : 'INFO',
+      kind: 'CLOSING_SOON',
+      title: `終了時刻が迫っています（残り ${Math.round(remainingMinutes)}分）`,
+      detail: `${openCards}枚がまだコートを確保しています。先に結果を入力してもらうため、参加者へアナウンスしてください。`,
+      quick: 'CLOSING',
     });
   }
 

@@ -569,3 +569,78 @@ input, select, textarea { font: inherit; color: inherit; }
   .sc-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .sc * { transition: none !important; animation: none !important; } }
+
+/* ── ワンクリック配信：本文はボードの現在の数字から作られる ── */
+.quick-cast {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--blue-600);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+.quick-cast-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.quick-cast-head svg {
+  color: var(--blue-600);
+}
+.quick-cast-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.quick-cast-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.quick-cast-text b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.quick-cast-body {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  line-height: 1.5;
+}
+.quick-cast-side {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+.alert-cast {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--blue-600);
+}
+@media (max-width: 720px) {
+  .quick-cast-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .quick-cast-side {
+    grid-auto-flow: column;
+    justify-content: space-between;
+    align-items: center;
+    justify-items: stretch;
+  }
+}

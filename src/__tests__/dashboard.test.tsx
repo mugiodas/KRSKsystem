@@ -138,6 +138,43 @@ describe('Phase 4: dashboard alert rules', () => {
       participants: [], requests: [], engine: null, nowMs: NOW });
     expect(veryLate[0].severity).toBe('URGENT');
   });
+  it('offers the closing notice only while there is something to announce about', () => {
+    const near = { ...event, endTime: new Date(NOW + 22 * 60_000).toISOString() };
+    const withCards = buildAlerts({ event: near, courts: [court({})],
+      matches: [match({ status: 'PLAYING', startTime: new Date(NOW - 4 * 60_000).toISOString(), endTime: null })],
+      participants: [], requests: [], engine: null, nowMs: NOW });
+    const closing = withCards.find((alert) => alert.kind === 'CLOSING_SOON');
+    expect(closing?.title).toBe('終了時刻が迫っています（残り 22分）');
+    expect(closing?.severity).toBe('INFO');
+    expect(closing?.quick).toBe('CLOSING');
+
+    // Nothing still on a court means nothing to warn about.
+    const quiet = buildAlerts({ event: near, courts: [court({})], matches: [], participants: [], requests: [], engine: null, nowMs: NOW });
+    expect(quiet.some((alert) => alert.kind === 'CLOSING_SOON')).toBe(false);
+
+    // The final ten minutes raise the volume on the same fact.
+    const urgent = buildAlerts({ event: { ...event, endTime: new Date(NOW + 8 * 60_000).toISOString() },
+      courts: [court({})], matches: [match({})], participants: [], requests: [], engine: null, nowMs: NOW });
+    expect(urgent.find((alert) => alert.kind === 'CLOSING_SOON')?.severity).toBe('IMPORTANT');
+
+    // Past the end time the countdown stops being useful; the engine guard says it instead.
+    const ended = buildAlerts({ event: { ...event, endTime: new Date(NOW - 60_000).toISOString() },
+      courts: [court({})], matches: [match({})], participants: [], requests: [],
+      engine: engineWith([], { timeProtected: true, remainingMinutes: 0 }), nowMs: NOW });
+    expect(ended.some((alert) => alert.kind === 'CLOSING_SOON')).toBe(false);
+    expect(ended.find((alert) => alert.kind === 'TIME_PROTECTED')?.quick).toBe('CLOSING');
+  });
+
+  it('pairs each blocked court alert with the notice that unblocks it', () => {
+    const missing = match({ status: 'RESULT_PENDING', startTime: new Date(NOW - 25 * 60_000).toISOString(), endTime: new Date(NOW - 4 * 60_000).toISOString() });
+    const entered = buildAlerts({ event, courts: [court({})], matches: [missing], participants: [], requests: [], engine: null, nowMs: NOW });
+    expect(entered.find((alert) => alert.kind === 'MISSING_RESULT')?.quick).toBe('RESULTS');
+
+    const claimed = match({ status: 'RESULT_PENDING', resultStatus: 'ENTERED', reportedScoreA: 21, reportedScoreB: 19,
+      endTime: new Date(NOW - 40 * 60_000).toISOString(), startTime: new Date(NOW - 60 * 60_000).toISOString() });
+    const unconfirmed = buildAlerts({ event, courts: [court({})], matches: [claimed], participants: [], requests: [], engine: null, nowMs: NOW });
+    expect(unconfirmed.find((alert) => alert.kind === 'RESULT_UNCONFIRMED')?.quick).toBe('UNCONFIRMED');
+  });
 });
 
 describe('Phase 4: dashboard rendering', () => {
@@ -213,5 +250,13 @@ describe('Phase 4: dashboard rendering', () => {
       onJump: () => undefined, loading: false,
     }));
     expect(filled).toContain('要即時対応');
+
+    // A quick-broadcast alert is clickable even though it names no court.
+    const castable = renderToStaticMarkup(createElement(AlertRail, {
+      alerts: [{ id: 'y', severity: 'INFO', kind: 'CLOSING_SOON', title: '終了時刻が迫っています（残り 22分）', detail: '2枚がまだコートを確保しています', quick: 'CLOSING' as const }],
+      onJump: () => undefined, loading: false,
+    }));
+    expect(castable).toContain('クリックでこの内容の告知を作成');
+    expect(castable).not.toContain('disabled');
   });
 });

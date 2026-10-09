@@ -4,7 +4,7 @@ import { Activity, BarChart3, ClipboardList, FileBarChart2, ListChecks, LogOut, 
 import { api, ApiError } from '../api/client';
 import type { DashboardAlert } from '../lib/alerts';
 import type { EngineState } from '../api/types';
-import { buildAlerts } from '../lib/alerts';
+import { buildAlerts, type QuickBroadcast } from '../lib/alerts';
 import { useEventSnapshot, useNow } from '../state/useEventSnapshot';
 import { useSession } from '../auth/session';
 import { AlertRail } from '../components/dashboard/AlertRail';
@@ -21,7 +21,7 @@ import { SettingsModal } from '../components/dashboard/SettingsModal';
 import { RankingPanel } from '../components/dashboard/RankingPanel';
 import { RequestPanel } from '../components/dashboard/RequestPanel';
 import { AuditPanel } from '../components/dashboard/AuditPanel';
-import { AnnouncementsPanel } from '../components/dashboard/AnnouncementsPanel';
+import { AnnouncementsPanel, type PendingCard } from '../components/dashboard/AnnouncementsPanel';
 import { ReportPanel } from '../components/dashboard/ReportPanel';
 import { Chip, SEVERITY_LABEL, useToast } from '../components/ui';
 import { clockTime, minutesBetween, parseIso } from '../lib/time';
@@ -45,6 +45,7 @@ export function DashboardPage() {
   const [modal, setModal] = useState<Modal>(null);
   const [tab, setTab] = useState<'board' | 'tournament' | 'ranking' | 'requests' | 'announcements' | 'audit' | 'report'>('board');
   const [selected, setSelected] = useState<string[]>([]);
+  const [quickTemplate, setQuickTemplate] = useState<QuickBroadcast | null>(null);
   const [running, setRunning] = useState(false);
 
   const alerts = useMemo<DashboardAlert[]>(() => {
@@ -84,6 +85,11 @@ export function DashboardPage() {
   }, [eventId, refresh, toast]);
 
   const jumpToAlert = useCallback((alert: DashboardAlert) => {
+    if (alert.quick) {
+      setTab('announcements');
+      setQuickTemplate(alert.quick);
+      return;
+    }
     if (alert.matchId && matchById.get(alert.matchId)?.status === 'RESULT_PENDING') {
       setModal({ type: 'result', matchId: alert.matchId, mode: 'enter' });
       return;
@@ -127,6 +133,18 @@ export function DashboardPage() {
   const waitingCount = engine?.waitingPlayers.length ?? 0;
   const freeCourts = courts.filter((court) => court.enabled === 1 && !activeMatches.some((match) => match.courtId === court.courtId));
   const dataAgeSeconds = Math.round((nowMs - snapshot.fetchedAt) / 1000);
+
+  // Courts held by an unfinished result — the two notices above both name them.
+  const blockedCards = { resultPending: [] as PendingCard[], unconfirmed: [] as PendingCard[] };
+  activeMatches.forEach((match) => {
+    if (match.status !== 'RESULT_PENDING') return;
+    const card: PendingCard = {
+      courtName: match.courtName ?? 'コート未定',
+      label: `${match.playerAName} × ${match.playerBName}`,
+    };
+    if (match.resultStatus === 'ENTERED') blockedCards.unconfirmed.push(card);
+    else if (!match.resultStatus) blockedCards.resultPending.push(card);
+  });
 
   const toggleSelect = (participantId: string) => setSelected((current) => (
     current.includes(participantId) ? current.filter((id) => id !== participantId) : [...current.slice(-1), participantId]
@@ -264,7 +282,13 @@ export function DashboardPage() {
           {tab === 'requests' ? (
             <RequestPanel eventId={eventId} requests={snapshot.requests} matches={snapshot.allMatches} canOperate={canOperate} onChanged={() => refresh({ silent: true })} />
           ) : null}
-          {tab === 'announcements' ? <AnnouncementsPanel eventId={eventId} canOperate={canOperate} /> : null}
+          {tab === 'announcements' ? (
+            <AnnouncementsPanel
+              eventId={eventId} canOperate={canOperate} endTime={event.endTime} nowMs={nowMs}
+              resultPending={blockedCards.resultPending} unconfirmed={blockedCards.unconfirmed}
+              preselect={quickTemplate} onPreselect={setQuickTemplate}
+            />
+          ) : null}
           {tab === 'audit' && canOperate ? <AuditPanel eventId={eventId} /> : null}
           {tab === 'report' ? <ReportPanel eventId={eventId} /> : null}
         </div>

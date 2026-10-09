@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Zap } from 'lucide-react';
 import type { DashboardAlert } from '../../lib/alerts';
 
 const ICON = { URGENT: AlertTriangle, IMPORTANT: AlertTriangle, INFO: Info } as const;
@@ -19,12 +19,12 @@ export function AlertRail({ alerts, onJump, loading }: { alerts: DashboardAlert[
           </div>
         ) : alerts.map((alert) => {
           const Icon = ICON[alert.severity];
-          const clickable = Boolean(alert.matchId || alert.courtId || (alert.participantIds && alert.participantIds.length > 0));
+          const clickable = Boolean(alert.quick || alert.matchId || alert.courtId || (alert.participantIds && alert.participantIds.length > 0));
           return (
             <button
               key={alert.id} type="button" className={`alert-card ${alert.severity}`}
               disabled={!clickable} onClick={() => onJump(alert)}
-              title={clickable ? 'クリックして該当箇所へ移動します' : undefined}
+              title={alert.quick ? 'クリックしてワンクリック配信の内容を確認します' : clickable ? 'クリックして該当箇所へ移動します' : undefined}
             >
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Icon size={13} style={{ flex: '0 0 auto' }} />
@@ -35,6 +35,7 @@ export function AlertRail({ alerts, onJump, loading }: { alerts: DashboardAlert[
                 </span>
               </h3>
               <p>{alert.detail}</p>
+              {alert.quick ? <p className="alert-cast"><Zap size={10} />クリックでこの内容の告知を作成（1クリックで配信）</p> : null}
             </button>
           );
         })}
