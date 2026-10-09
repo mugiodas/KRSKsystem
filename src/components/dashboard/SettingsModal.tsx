@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Pause, Play, StopCircle } from 'lucide-react';
 import { api, ApiError } from '../../api/client';
-import type { EventDetail } from '../../api/types';
+import type { EventDetail, ScreenSettings } from '../../api/types';
 import { Chip, Modal, useToast } from '../ui';
 
 interface Props {
@@ -172,6 +172,7 @@ export function SettingsModal({ event, onClose, onSaved }: Props) {
           ))}
         </div>
       </div>
+      <ScreenSection eventId={event.eventId} />
       <div className="notice info">
         <span>
           現在：1試合 {event.defaultMatchMinutes}分 + 結果入力 {event.resultInputGraceMinutes}分 + 安全マージン {event.safetyMarginMinutes}分
@@ -179,5 +180,93 @@ export function SettingsModal({ event, onClose, onSaved }: Props) {
         </span>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The projector board link. A TV in the hall cannot log in, so the board is opened by
+ * an event scoped token; issuing a new one invalidates the old link immediately, which
+ * is the whole story when a printed address gets around.
+ */
+function ScreenSection({ eventId }: { eventId: string }) {
+  const toast = useToast();
+  const [info, setInfo] = useState<ScreenSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api.screenPreview(eventId)
+      .then((value) => { if (alive) setInfo(value.screen); })
+      .catch(() => { if (alive) setInfo({ enabled: false, token: null, path: null }); });
+    return () => { alive = false; };
+  }, [eventId]);
+
+  const url = info?.path ? `${window.location.origin}${info.path}` : null;
+
+  async function issue() {
+    setBusy(true);
+    try {
+      const next = await api.screenIssue(eventId);
+      setInfo({ enabled: true, token: next.token, path: next.path });
+      toast.push('会場スクリーンの表示用リンクを発行しました。');
+    } catch (caught) {
+      toast.push(caught instanceof ApiError ? caught.message : 'リンクの発行に失敗しました。', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    setBusy(true);
+    try {
+      await api.screenRevoke(eventId);
+      setInfo({ enabled: false, token: null, path: null });
+      toast.push('表示用リンクを無効化しました。開いていた画面は次回更新で止まります。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.push('表示用URLをコピーしました。');
+    } catch {
+      toast.push('ブラウザが自動コピーに非対応です。URLを選択してコピーしてください。', 'info');
+    }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: '8px 10px', display: 'grid', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <b style={{ fontSize: 12 }}>会場スクリーン</b>
+        <Chip tone={info?.enabled ? 'ok' : ''}>{info?.enabled ? '表示中' : '未発行'}</Chip>
+        <span style={{ fontSize: 10.5, color: 'var(--ink-500)', marginLeft: 'auto' }}>
+          ログイン不要の読み取り専用。表示用URLを知っている人だけが開けます
+        </span>
+      </div>
+      {info?.enabled && url ? (
+        <>
+          <input
+            readOnly value={url} onFocus={(event2) => event2.currentTarget.select()}
+            style={{ fontFamily: 'var(--mono)', fontSize: 11.5, height: 26, border: '1px solid var(--line-strong)', borderRadius: 4, padding: '0 6px', color: 'var(--ink-700)', background: 'var(--surface-alt)' }}
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className="btn sm" onClick={() => void copy()}>URLをコピー</button>
+            <a className="btn sm" href={info.path ?? '#'} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>プレビュー</a>
+            <button type="button" className="btn sm" disabled={busy} onClick={() => void issue()}>リンクを作り直す</button>
+            <button type="button" className="btn sm danger" disabled={busy} onClick={() => void revoke()}>無効化</button>
+          </div>
+        </>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>まだリンクがありません。</span>
+          <button type="button" className="btn sm primary" disabled={busy || !info} onClick={() => void issue()}>
+            {busy ? '処理中…' : '表示用リンクを発行'}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

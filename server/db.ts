@@ -54,6 +54,7 @@ export function migrate(db: DB): void {
       maximum_rest_minutes INTEGER NOT NULL DEFAULT 30 CHECK (maximum_rest_minutes BETWEEN 1 AND 300),
       result_input_grace_minutes INTEGER NOT NULL DEFAULT 3 CHECK (result_input_grace_minutes BETWEEN 0 AND 30),
       result_confirm_timeout_minutes INTEGER NOT NULL DEFAULT 3 CHECK (result_confirm_timeout_minutes BETWEEN 0 AND 60),
+      screen_token TEXT,
       late_match_cutoff_minutes INTEGER NOT NULL DEFAULT 5 CHECK (late_match_cutoff_minutes BETWEEN 0 AND 60),
       safety_margin_minutes INTEGER NOT NULL DEFAULT 5 CHECK (safety_margin_minutes BETWEEN 0 AND 60),
       league_match_count INTEGER NOT NULL DEFAULT 4 CHECK (league_match_count BETWEEN 1 AND 50),
@@ -359,6 +360,9 @@ export function ensureSchema(db: DB): void {
   ensureColumn(db, 'matches', 'bracket_slot', 'bracket_slot INTEGER');
   ensureColumn(db, 'events', 'result_confirm_timeout_minutes',
     'result_confirm_timeout_minutes INTEGER NOT NULL DEFAULT 3');
+  // The published projector board is addressed by an unguessable token instead of a
+  // login, so a TV can be left running without handing out staff credentials.
+  ensureColumn(db, 'events', 'screen_token', 'screen_token TEXT');
   ensureColumn(db, 'results', 'entered_by_participant', 'entered_by_participant TEXT REFERENCES participants(participant_id)');
   ensureColumn(db, 'results', 'dispute', 'dispute TEXT');
   ensureColumn(db, 'results', 'auto_confirmed', 'auto_confirmed INTEGER NOT NULL DEFAULT 0');

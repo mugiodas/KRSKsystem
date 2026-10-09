@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { EventSelectPage } from './pages/EventSelectPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ParticipantHome } from './pages/participant/ParticipantHome';
+import { ScreenPage } from './pages/ScreenPage';
 
 function Gate({ children, staffOnly }: { children: React.ReactNode; staffOnly?: boolean }) {
   const { session, loading } = useSession();
@@ -31,6 +32,8 @@ export default function App() {
             <Route path="/" element={<Gate><EventSelectPage /></Gate>} />
             <Route path="/events/:eventId" element={<Gate staffOnly><DashboardPage /></Gate>} />
             <Route path="/m" element={<Gate><ParticipantHome /></Gate>} />
+            {/* The hall board is opened by its token, not by a session: no Gate here. */}
+            <Route path="/screen/:eventId" element={<ScreenPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

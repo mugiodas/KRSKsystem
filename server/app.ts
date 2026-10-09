@@ -16,6 +16,7 @@ import { createParticipantRouter } from './routes/participant.js';
 import { createReportRouter } from './routes/report.js';
 import { createSnapshotRouter } from './routes/snapshot.js';
 import { createTournamentRouter } from './routes/tournament.js';
+import { createPublicScreenRouter, createScreenRouter } from './routes/screen.js';
 import { gzipJson } from './gzip.js';
 import { maybeRunEngine } from './services/autoEngine.js';
 
@@ -74,6 +75,10 @@ export function createApp(db: DB) {
     sendData(res, req.auth);
   });
 
+  // The projector board is polled by a TV that has no account: only the published
+  // link (an event scoped token) opens it, so it sits outside requireAuth.
+  app.use('/api/public', createPublicScreenRouter(db));
+  app.use('/api', requireAuth, createScreenRouter(db));
   app.use('/api', requireAuth, createCoreRouter(db));
   app.use('/api', requireAuth, createMatchRouter(db, (eventId) => maybeRunEngine(db, eventId)));
   app.use('/api', requireAuth, createRequestRouter(db));

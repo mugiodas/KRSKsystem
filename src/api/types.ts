@@ -35,6 +35,61 @@ export interface EventClass {
   rowVersion: number;
 }
 
+/** One court on the projector board. */
+export interface ScreenMatch {
+  status: string;
+  phase: 'LEAGUE' | 'REQUEST' | 'TOURNAMENT' | string;
+  roundName: string | null;
+  playerAName: string;
+  playerBName: string;
+  scoreA: number | null;
+  scoreB: number | null;
+  scheduledTime: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  resultStatus: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | null;
+}
+
+export interface ScreenCourt {
+  courtNumber: number;
+  courtName: string;
+  status: string;
+  available: boolean;
+  match: ScreenMatch | null;
+  endsInMinutes: number | null;
+  overMinutes: number;
+}
+
+/** The whole published board. Deliberately id free: see server/services/screen.ts. */
+export interface ScreenBoard {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  venue: string;
+  status: string;
+  phase: string;
+  startTime: string;
+  endTime: string;
+  serverTime: string;
+  nowMs: number;
+  elapsedMinutes: number;
+  remainingMinutes: number;
+  progress: { completedMatches: number; openMatches: number; courtsBusy: number; courtsTotal: number };
+  league: { status: 'NOT_APPLICABLE' | 'ON_TRACK' | 'BEHIND' | 'WONT_FIT' | string; completedMatches: number; plannedMatches: number; completionRate: number } | null;
+  courts: ScreenCourt[];
+  upNext: Array<{ players: string; courtName: string | null; etaMinutes: number | null }>;
+  results: Array<{ winner: string; loser: string; score: string; at: string | null }>;
+  standings: Array<{ className: string; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
+  brackets: Array<{ className: string; size: number; status: string; roundName: string | null; decided: number; total: number; champion: string | null }>;
+  announcements: Array<{ title: string; body: string; severity: string; at: string }>;
+}
+
+export interface ScreenSettings {
+  enabled: boolean;
+  token: string | null;
+  path: string | null;
+}
+
 /** League plan per class, as the round-robin generator would slice it. */
 export interface LeagueClassProgress {
   classId: string;

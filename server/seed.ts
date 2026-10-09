@@ -54,6 +54,9 @@ export function seedDatabase(db: DB): void {
     ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', 'LEAGUE_REQUEST', 'LEAGUE', 60, 500, ?, ?, ?, ?)`)
       .run(DEMO_EVENT_ID, 'KRSK SYSTEM DEMO EVENT', now.toISOString().slice(0, 10), '唐崎市民体育館',
         start.toISOString(), end.toISOString(), '20名・2クラス・4コートの操作可能なデモイベントです。', created, created, ownerId ?? null);
+      // 会場スクリーン（ログイン不要の提示用URL）。デモはその場で開けるよう固定値にしておきますが、
+      // 運営がリンクを作り直し／無効化した後は上書きしません（この INSERT 時のみ設定するため）。
+      db.prepare('UPDATE events SET screen_token = ? WHERE event_id = ?').run('krsk-demo-screen', DEMO_EVENT_ID);
 
     db.prepare(`INSERT INTO classes (class_id, event_id, class_name, display_order, description, enabled, created_at, updated_at)
       VALUES ('cls_demo_a', ?, 'Aクラス', 1, '競技経験が長い選手', 1, ?, ?),
@@ -114,6 +117,7 @@ function seedTournamentDemo(db: DB, ownerId: string | null): void {
       .run(TOURNAMENT_DEMO_EVENT_ID, 'KRSK SYSTEM DEMO トーナメント', now.toISOString().slice(0, 10), '唐崎市民体育館',
         start.toISOString(), end.toISOString(),
         '8名・1クラス・2コート。トーナメント表の自動生成から結果入力までを試すデモイベントです。', created, created, ownerId);
+      db.prepare('UPDATE events SET screen_token = ? WHERE event_id = ?').run('krsk-demo-draw', TOURNAMENT_DEMO_EVENT_ID);
 
     db.prepare(`INSERT INTO classes (class_id, event_id, class_name, display_order, description, enabled, created_at, updated_at)
       VALUES ('cls_demo_t', ?, 'トーナメント', 1, 'シード順でドローを作成する練習会', 1, ?, ?)`).run(TOURNAMENT_DEMO_EVENT_ID, created, created);

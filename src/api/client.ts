@@ -2,6 +2,7 @@ import type {
   AnnouncementRow, CourtRow, EngineRunResult, EngineState, EventDetail, EventSummary, LeaguePreview, MatchRow,
   EventReport, EventSnapshot, IntegrityReport, MyMatchView, TournamentBracket, TournamentGenerated, TournamentPreview, ParticipantRow, RankingRow, RequestRow, ResultRow, ScoreBreakdown, Session,
   LeagueProgress,
+  ScreenBoard, ScreenSettings,
 } from './types';
 
 export class ApiError extends Error {
@@ -12,6 +13,21 @@ export class ApiError extends Error {
 }
 
 const BASE = '/api';
+
+async function publicScreen<T>(eventId: string, token: string): Promise<T> {
+  const response = await fetch(`${BASE}/public/screen/${encodeURIComponent(eventId)}?t=${encodeURIComponent(token)}`, {
+    method: 'GET',
+    credentials: 'omit',
+    headers: { accept: 'application/json' },
+  });
+  const text = await response.text();
+  let payload: any = {};
+  if (text) { try { payload = JSON.parse(text); } catch { payload = {}; } }
+  if (!response.ok) {
+    throw new ApiError(response.status, payload?.error?.code ?? 'ERROR', payload?.error?.message ?? '表示用リンクを読み込めませんでした。');
+  }
+  return payload?.data as T;
+}
 
 async function call<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
@@ -110,6 +126,12 @@ export const api = {
   engineRun: (eventId: string, body: Record<string, unknown> = {}) => call<EngineRunResult>('POST', `/events/${eventId}/engine/run`, body),
   engineExplain: (eventId: string, matchId?: string) =>
     call<ExplainResponse>('GET', `/events/${eventId}/engine/explain${matchId ? `?matchId=${matchId}` : ''}`),
+
+  // The projector board is public by design, so it must not send the session cookie.
+  screenBoard: (eventId: string, token: string) => publicScreen<ScreenBoard>(eventId, token),
+  screenPreview: (eventId: string) => call<ScreenBoard & { screen: ScreenSettings }>('GET', `/events/${eventId}/screen`),
+  screenIssue: (eventId: string) => call<{ token: string; path: string }>('POST', `/events/${eventId}/screen/token`),
+  screenRevoke: (eventId: string) => call<{ token: null; path: null }>('DELETE', `/events/${eventId}/screen/token`),
 
   leagueProgress: (eventId: string) => call<LeagueProgress>('GET', `/events/${eventId}/league/progress`),
   leaguePreview: (eventId: string, classIds?: string[]) => call<LeaguePreview>('POST', `/events/${eventId}/league/preview`, { classIds }),
