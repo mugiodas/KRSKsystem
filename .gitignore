@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-server/
+# 実行時の状態（SQLite 本体と -wal / -shm / -journal）。大会データなのでコミットしない
+data/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store

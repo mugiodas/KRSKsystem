@@ -1,0 +1,657 @@
+export type Role = 'OWNER' | 'ADMIN' | 'VIEWER' | 'PARTICIPANT';
+
+export interface Session {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  participantId: string | null;
+}
+
+export interface EventSummary {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  venue: string;
+  startTime: string;
+  endTime: string;
+  status: 'DRAFT' | 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  eventMode: 'LEAGUE_REQUEST' | 'REQUEST_ONLY' | 'LEAGUE_TOURNAMENT_REQUEST';
+  currentPhase: 'LEAGUE' | 'TOURNAMENT' | 'REQUEST';
+  maxParticipants: number;
+  participantCount: number;
+  courtCount: number;
+  matchCount: number;
+  completedMatchCount: number;
+}
+
+export interface EventClass {
+  classId: string;
+  eventId: string;
+  className: string;
+  displayOrder: number;
+  description: string;
+  enabled: number;
+  rowVersion: number;
+}
+
+/** One court on the projector board. */
+export interface ScreenMatch {
+  status: string;
+  phase: 'LEAGUE' | 'REQUEST' | 'TOURNAMENT' | string;
+  roundName: string | null;
+  playerAName: string;
+  playerBName: string;
+  scoreA: number | null;
+  scoreB: number | null;
+  scheduledTime: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  resultStatus: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | null;
+}
+
+export interface ScreenCourt {
+  courtNumber: number;
+  courtName: string;
+  status: string;
+  available: boolean;
+  match: ScreenMatch | null;
+  endsInMinutes: number | null;
+  overMinutes: number;
+}
+
+/** The whole published board. Deliberately id free: see server/services/screen.ts. */
+export interface ScreenBoard {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  venue: string;
+  status: string;
+  phase: string;
+  startTime: string;
+  endTime: string;
+  serverTime: string;
+  nowMs: number;
+  elapsedMinutes: number;
+  remainingMinutes: number;
+  progress: { completedMatches: number; openMatches: number; courtsBusy: number; courtsTotal: number };
+  league: { status: 'NOT_APPLICABLE' | 'ON_TRACK' | 'BEHIND' | 'WONT_FIT' | string; completedMatches: number; plannedMatches: number; completionRate: number } | null;
+  courts: ScreenCourt[];
+  upNext: Array<{ players: string; courtName: string | null; etaMinutes: number | null }>;
+  results: Array<{ winner: string; loser: string; score: string; at: string | null }>;
+  standings: Array<{ className: string; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
+  brackets: Array<{ className: string; size: number; status: string; roundName: string | null; decided: number; total: number; champion: string | null }>;
+  announcements: Array<{ title: string; body: string; severity: string; at: string }>;
+}
+
+export interface ScreenSettings {
+  enabled: boolean;
+  token: string | null;
+  path: string | null;
+}
+
+/** League plan per class, as the round-robin generator would slice it. */
+export interface LeagueClassProgress {
+  classId: string;
+  className: string;
+  size: number;
+  roundsPlanned: number;
+  pairsPlanned: number;
+  minutesPlanned: number;
+  minutesPerRound: number;
+  completed: number;
+  inFlight: number;
+  cancelled: number;
+  roundsFinished: number;
+  playersUnderTarget: number;
+  worstShortfall: number;
+}
+
+export interface LeagueShortfallRow {
+  participantId: string;
+  name: string;
+  className: string;
+  target: number;
+  played: number;
+  scheduled: number;
+  shortfall: number;
+}
+
+export interface LeagueProgress {
+  status: 'NOT_APPLICABLE' | 'ON_TRACK' | 'BEHIND' | 'WONT_FIT';
+  applicable: boolean;
+  phase: string;
+  leagueType: 'FULL_ROUND_ROBIN' | 'LIMITED_ROUND_ROBIN';
+  matchCountSetting: number;
+  courtCount: number;
+  slotMinutes: number;
+  classCount: number;
+  playerCount: number;
+  plannedMatches: number;
+  completedMatches: number;
+  inFlightMatches: number;
+  completionRate: number;
+  perPlayer: { avg: number; min: number; max: number; target: number };
+  playersUnderTarget: number;
+  mostMissing: number;
+  roundsOutstanding: number;
+  minutesNeeded: number;
+  minutesRemaining: number;
+  classes: LeagueClassProgress[];
+  /** Only the detail endpoint fills this in; the poll carries the aggregate. */
+  shortfalls: LeagueShortfallRow[];
+}
+
+export interface EventDetail extends Omit<EventSummary, 'participantCount' | 'courtCount' | 'matchCount' | 'completedMatchCount'> {
+  defaultMatchMinutes: number;
+  minimumRestMinutes: number;
+  maximumRestMinutes: number;
+  resultInputGraceMinutes: number;
+  resultConfirmTimeoutMinutes: number;
+  lateMatchCutoffMinutes: number;
+  safetyMarginMinutes: number;
+  leagueMatchCount: number;
+  leagueType: 'FULL_ROUND_ROBIN' | 'LIMITED_ROUND_ROBIN';
+  entryFee: number;
+  description: string;
+  allowRequest: number;
+  allowRematch: number;
+  allowSameDayRepeat: number;
+  autoCourtAssignment: number;
+  autoRematch: number;
+  noShowEnabled: number;
+  notificationEnabled: number;
+  autoEngineEnabled: number;
+  weightRequestPriority: number;
+  weightWaiting: number;
+  weightMatchBalance: number;
+  weightUnplayed: number;
+  weightRating: number;
+  weightTimeFit: number;
+  penaltyRecent: number;
+  penaltyRepeat: number;
+  rowVersion: number;
+  classes: EventClass[];
+  summary: {
+    participantCount: number; checkedInCount: number; courtCount: number;
+    matchCount: number; completedMatchCount: number;
+  };
+  /** League plan vs reality, recomputed on every poll. */
+  league?: LeagueProgress;
+}
+
+export interface ParticipantRow {
+  participantId: string;
+  eventId: string;
+  name: string;
+  nameKana: string;
+  club: string;
+  grade: string;
+  gender: string;
+  category: string;
+  classId: string | null;
+  className: string | null;
+  rating: number;
+  active: number;
+  checkedIn: number;
+  played: number;
+  wins: number;
+  /** League promise and digestion (0 when the event has no league phase). */
+  leagueTarget?: number;
+  leaguePlayed?: number;
+  leagueScheduled?: number;
+  leagueShortfall?: number;
+  rowVersion: number;
+  updatedAt: string;
+}
+
+export interface CourtRow {
+  courtId: string;
+  eventId: string;
+  courtNumber: number;
+  courtName: string;
+  status: 'AVAILABLE' | 'RESERVED' | 'CALLING' | 'PLAYING' | 'RESULT_PENDING' | 'BLOCKED' | 'MAINTENANCE';
+  availableFrom: string;
+  availableTo: string;
+  priority: number;
+  enabled: number;
+  currentMatchId: string | null;
+  rowVersion: number;
+}
+
+export type MatchStatus = 'WAITING' | 'CALLED' | 'COURT_ASSIGNED' | 'PLAYING' | 'RESULT_PENDING'
+  | 'COMPLETED' | 'CANCELLED' | 'DISPUTED' | 'NO_SHOW';
+
+export interface MatchRow {
+  matchId: string;
+  eventId: string;
+  phase: 'LEAGUE' | 'REQUEST' | 'TOURNAMENT';
+  classId: string | null;
+  className: string | null;
+  playerAId: string;
+  playerBId: string;
+  playerAName: string;
+  playerBName: string;
+  playerAClub: string;
+  playerBClub: string;
+  courtId: string | null;
+  courtName: string | null;
+  courtNumber: number | null;
+  scheduledTime: string | null;
+  calledTime: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  status: MatchStatus;
+  source: 'AUTO' | 'MANUAL' | 'REQUEST' | 'ADMIN';
+  priorityScore: number;
+  scoreA: number | null;
+  scoreB: number | null;
+  winnerId: string | null;
+  rowVersion: number;
+  updatedAt: string;
+  result?: ResultRow | null;
+  /** Confirmation state, denormalised onto the card so lists and polls can show it. */
+  resultStatus?: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | null;
+  resultEnteredAt?: string | null;
+  resultConfirmedAt?: string | null;
+  resultEnteredByParticipant?: string | null;
+  resultAutoConfirmed?: number;
+  reportedScoreA?: number | null;
+  reportedScoreB?: number | null;
+  resultDispute?: ResultDispute | null;
+}
+
+export interface ResultDispute {
+  scoreA?: number;
+  scoreB?: number;
+  by?: string | null;
+  note?: string | null;
+  at?: string;
+}
+
+export interface ResultRow {
+  resultId: string;
+  matchId: string;
+  scoreA: number;
+  scoreB: number;
+  winnerId: string;
+  status: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED';
+  enteredAt: string;
+  confirmedAt: string | null;
+  enteredByParticipant: string | null;
+  autoConfirmed: number;
+  dispute: ResultDispute | null;
+  rowVersion: number;
+}
+
+export interface WaitingPlayer {
+  participantId: string;
+  name: string;
+  className: string | null;
+  rating: number;
+  played: number;
+  wins: number;
+  waitingMinutes: number;
+  lastEndTime: string | null;
+  restReady: boolean;
+  restReadyInMinutes: number;
+  activeRequests: number;
+}
+
+export interface ScoreBreakdown {
+  requestPriority: number;
+  waitingScore: number;
+  matchCountBalance: number;
+  unplayedBonus: number;
+  ratingCompatibility: number;
+  remainingTimeFit: number;
+  recentMatchPenalty: number;
+  repeatPenalty: number;
+  total: number;
+  notes: string[];
+}
+
+export interface EngineCandidate {
+  playerAId: string;
+  playerAName: string;
+  playerBId: string;
+  playerBName: string;
+  classId: string | null;
+  className: string | null;
+  mutual: boolean;
+  requestPriority: 1 | 2 | 3 | null;
+  repeats: number;
+  ratingDiff: number;
+  pairWaitingMinutes: number;
+  restGapMinutes: number;
+  breakdown: ScoreBreakdown;
+  score: number;
+}
+
+export interface BlockedCandidate extends Omit<EngineCandidate, 'breakdown' | 'score'> {
+  reason: string;
+  reasonLabel: string;
+}
+
+export interface EventSnapshot {
+  eventId: string;
+  fetchedAt: string;
+  event: EventDetail;
+  courts: CourtRow[];
+  matches: MatchRow[];
+  allMatches: MatchRow[];
+  participants: ParticipantRow[];
+  requests: RequestRow[];
+  engine: EngineState;
+}
+
+export interface EngineState {
+  ranAt: string;
+  eventId: string;
+  eventName: string;
+  phase: string;
+  eventMode: string;
+  eventStatus: string;
+  engineEnabled: boolean;
+  autoCourtAssignment: boolean;
+  allowRequest: boolean;
+  remainingMinutes: number;
+  matchSlotMinutes: number;
+  timeProtected: boolean;
+  eligibleCount: number;
+  busyPlayerCount: number;
+  courts: Array<{ courtId: string; courtNumber: number; courtName: string; status: string; busy: boolean; free: boolean }>;
+  freeCourtCount: number;
+  queue: Array<{ matchId: string; phase: string; playerAName: string; playerBName: string; scheduledTime: string | null }>;
+  waitingPlayers: WaitingPlayer[];
+  /** Null on the polled snapshot: candidate scoring only runs when the modal asks for it. */
+  evaluatedPairs: number | null;
+  candidates: EngineCandidate[];
+  blocked: BlockedCandidate[];
+  blockedCounts: Record<string, number>;
+  weights: Record<string, number>;
+}
+
+export interface EngineRunResult {
+  ranAt: string;
+  engineEnabled: boolean;
+  phase: string;
+  freeCourts: number;
+  assignedQueue: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string }>;
+  created: Array<{ matchId: string; courtId: string; courtName: string; playerAName: string; playerBName: string; score: number }>;
+  candidates: EngineCandidate[];
+  /** Null on the polled snapshot: candidate scoring only runs when the modal asks for it. */
+  evaluatedPairs: number | null;
+  blocked: BlockedCandidate[];
+  blockedCounts: Record<string, number>;
+  skippedReasons: Record<string, number>;
+  endedByTimeProtection: boolean;
+}
+
+export interface RequestRow {
+  requestId: string;
+  requesterId: string;
+  requesterName: string;
+  targetPlayerId: string;
+  targetName: string;
+  targetClassName: string | null;
+  priority: 1 | 2 | 3;
+  status: 'ACTIVE' | 'MATCHED' | 'CANCELLED' | 'EXPIRED';
+  matchedMatchId?: string | null;
+  matchedMatchStatus?: string | null;
+  matchedCourtName?: string | null;
+  createdAt: string;
+  rowVersion: number;
+  own?: boolean;
+}
+
+export interface RankingRow {
+  classId: string | null;
+  className: string | null;
+  rank: number;
+  participantId: string;
+  participantName: string;
+  club: string;
+  played: number;
+  wins: number;
+  losses: number;
+  gamesWon: number;
+  gamesLost: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDifference: number;
+  winRate: number;
+  rankingValue: number;
+}
+
+export interface LeaguePair {
+  classId: string;
+  className: string;
+  round: number;
+  playerAId: string;
+  playerAName: string;
+  playerBId: string;
+  playerBName: string;
+  scheduledTime: string;
+  estimatedEndTime: string;
+  existing: boolean;
+  fitsBeforeEnd: boolean;
+}
+
+export interface LeaguePreview {
+  pairs: LeaguePair[];
+  summary: {
+    participantCount: number;
+    matchCount: number;
+    classCount: number;
+    excludedByEndTime: number;
+    duplicateCount: number;
+  };
+}
+
+export interface TournamentPreviewClass {
+  classId: string;
+  className: string;
+  entrants: Array<{ participantId: string; name: string; seed: number; rating: number }>;
+  size: number;
+  rounds: number;
+  byes: number;
+  requiredMatches: number;
+  roundOneCards: number;
+  estimatedMinutes: number;
+  fitsBeforeEnd: boolean;
+  reason: string | null;
+}
+
+export interface TournamentPreview {
+  classes: TournamentPreviewClass[];
+  summary: {
+    classCount: number; entrants: number; matchCount: number;
+    blockedClasses: number; fitsBeforeEnd: boolean; perRoundMinutes: number;
+  };
+}
+
+/** One box of the draw: a card, or the slot that a bye already decided. */
+export interface TournamentPairing {
+  round: number;
+  roundLabel: string;
+  slot: number;
+  matchId: string | null;
+  playerAId: string | null;
+  playerAName: string | null;
+  playerBId: string | null;
+  playerBName: string | null;
+  status: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
+  winnerId: string | null;
+  courtName: string | null;
+  scheduledTime: string | null;
+  bye: boolean;
+}
+
+export interface TournamentBracket {
+  bracketId: string;
+  eventId: string;
+  classId: string;
+  className: string | null;
+  format: string;
+  size: number;
+  rounds: number;
+  status: string;
+  winnerId: string | null;
+  winnerName: string | null;
+  entrants: Array<{ participantId: string; name: string; seed: number; slot: number }>;
+  byes: number;
+  decidedMatches: number;
+  requiredMatches: number;
+  pairings: TournamentPairing[];
+}
+
+export interface TournamentGenerated {
+  bracket: TournamentBracket;
+  created: Array<{ matchId: string; round: number; roundLabel: string; playerAName: string; playerBName: string }>;
+  walkovers: Array<{ participantName: string; intoRound: number; roundLabel: string }>;
+}
+
+export interface ApiFailure { code: string; message: string }
+
+
+/* ---------- participant aggregate (GET /events/:eventId/me) ---------- */
+export interface MyNextMatch {
+  matchId: string;
+  status: 'WAITING' | 'CALLED' | 'COURT_ASSIGNED' | 'PLAYING' | 'RESULT_PENDING';
+  courtName: string | null;
+  courtNumber: number | null;
+  opponentName: string;
+  opponentClub: string;
+  scheduledTime: string | null;
+  startTime: string | null;
+  phase: 'LEAGUE' | 'REQUEST' | 'TOURNAMENT';
+  scoreA: number | null;
+  scoreB: number | null;
+  isMineSideA: boolean;
+  bracket: { round: number; rounds: number; roundLabel: string; bracketStatus: string } | null;
+  result: MyResultState | null;
+}
+
+/** The state of this card's score report, from the player's own point of view. */
+export interface MyResultState {
+  status: 'ENTERED' | 'CONFIRMED' | 'DISPUTED' | 'CORRECTED' | 'NONE';
+  scoreMine?: number;
+  scoreOpponent?: number;
+  enteredByMe: boolean;
+  enteredAt?: string | null;
+  canConfirm: boolean;
+  canReject: boolean;
+  canSubmit?: boolean;
+  claim: { scoreMine: number | null; scoreOpponent: number | null; note: string | null } | null;
+}
+
+export interface MyMatchView {
+  participant: { participantId: string; name: string; className: string | null; club: string; rating: number; active: boolean; checkedIn: boolean };
+  event: { eventName: string; status: string; phase: string; startTime: string; endTime: string; allowRequest: boolean;
+    defaultMatchMinutes: number; resultConfirmTimeoutMinutes?: number };
+  today: { played: number; wins: number; losses: number; pointsFor: number; courtsUsed: number };
+  rank: { rank: number; of: number; winRate: number; pointDifference: number } | null;
+  nextMatch: MyNextMatch | null;
+  waiting: {
+    minutes: number; estimateMinutes: number | null; position: number | null; waitingCount: number;
+    restBlocked: boolean; restReadyInMinutes: number; slotMinutes: number; freeCourts: number;
+  };
+  history: Array<{ matchId: string; opponentName: string; won: boolean; scoreMine: number; scoreOpponent: number; courtName: string | null; endTime: string | null; phase: string }>;
+  otherMatches: Array<{ matchId: string; status: string; courtName: string | null; scheduledTime: string | null; opponentName: string }>;
+  requests: Array<{ requestId: string; targetName: string; requesterName: string; mine: boolean; priority: number; status: string;
+    createdAt: string; rowVersion: number; matchedStatus: string | null; matchedCourtName: string | null; matchedScheduledTime: string | null }>;
+  announcements: Array<{ title: string; body: string; severity: 'INFO' | 'IMPORTANT' | 'URGENT'; createdAt: string; actorName: string | null }>;
+}
+
+export interface AnnouncementRow {
+  announcementId: string; eventId: string; title: string; body: string;
+  severity: 'INFO' | 'IMPORTANT' | 'URGENT'; active: number; createdAt: string; actorName?: string | null;
+}
+
+/** One participant's line in the event report. */
+export interface ParticipantReportRow {
+  participantId: string;
+  name: string;
+  className: string | null;
+  club: string;
+  rating: number;
+  checkedIn: boolean;
+  played: number;
+  wins: number;
+  losses: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDifference: number;
+  winRate: number;
+  totalWaitingMinutes: number;
+  longestWaitingMinutes: number;
+  requestCount: number;
+  requestFulfilled: number;
+  noShows: number;
+}
+
+export interface IntegrityViolation {
+  code: string;
+  severity: 'CRITICAL' | 'WARNING';
+  count: number;
+  sample: string | null;
+}
+
+/** The integrity self-check (spec section 43): the same rules QA runs after every event. */
+export interface IntegrityReport {
+  eventId: string;
+  checkedAt: string;
+  checks: number;
+  violations: IntegrityViolation[];
+  clean: boolean;
+}
+
+/** Event report (Phase 6): every figure is computed from stored rows, never estimated. */
+export interface EventReport {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  venue: string;
+  status: string;
+  eventMode: string;
+  phase: string;
+  generatedAt: string;
+  window: { start: string; end: string; plannedMinutes: number; actualLastMatch: string | null; playedMinutes: number };
+  participants: { registered: number; active: number; checkedIn: number; classes: number };
+  matches: {
+    total: number; completed: number; cancelled: number; noShow: number; pendingResult: number;
+    bySource: Record<string, number>; byPhase: Record<string, number>;
+  };
+  matchCount: { total: number; avg: number; min: number; max: number; spread: number; zeroMatchPlayers: number; histogram: Array<{ matches: number; players: number }> };
+  waiting: {
+    avgMinutes: number; maxMinutes: number; over30Players: number; p90Minutes: number; samples: number;
+    longestIdleMinutes: number; idleOver30Players: number; idlePlayers: number;
+  };
+  courts: { count: number; utilization: number; busyMinutes: number; availableMinutes: number; perCourt: Array<{ courtId: string; courtName: string; matches: number; busyMinutes: number; utilization: number }> };
+  requests: { total: number; active: number; matched: number; cancelled: number; expired: number; fulfillmentRate: number };
+  fairness: { playedStdDev: number; balanceScore: number; mostPlayed: string | null; leastPlayed: string | null };
+  automation: { autoEngine: boolean; autoCourt: boolean; createdAuto: number; createdManual: number; autoShare: number };
+  noShows: { count: number; affectedPlayers: number; rate: number };
+  league: {
+    applicable: boolean; status: string; plannedMatches: number; completedMatches: number; inFlightMatches: number;
+    completionRate: number; roundsPlanned: number; roundsFinished: number;
+    perPlayer: { avg: number; min: number; max: number; target: number };
+    playersUnderTarget: number; mostMissing: number; minutesNeeded: number; minutesRemaining: number;
+    shortfalls: Array<{ name: string; className: string; target: number; played: number; shortfall: number }>;
+  };
+  confirmations: {
+    total: number; confirmed: number; corrected: number; entered: number; disputed: number;
+    autoConfirmed: number; byPlayers: number; pendingMatches: number; avgConfirmMinutes: number | null; confirmRate: number;
+  };
+  tournament: {
+    brackets: number; open: number; completed: number; cards: number; decided: number; walkovers: number;
+    byClass: Array<{ classId: string; className: string | null; size: number; rounds: number; status: string; winner: string | null }>;
+    champion: { name: string; className: string | null } | null;
+  };
+  integrity: IntegrityReport;
+  standings: Array<{ className: string | null; rows: Array<{ rank: number; name: string; played: number; wins: number; pointDifference: number }> }>;
+  rows: ParticipantReportRow[];
+}
