@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { DB } from './db.js';
 import { nowIso, transaction } from './db.js';
 import { createUser } from './auth.js';
@@ -29,7 +30,47 @@ const demoParticipants = [
   ['橋本 蒼', 'はしもと あおい', '草津JBC', '3年', 'MALE', 990],
 ] as const;
 
+/**
+ * Whether this process carries the demo content (two synthetic events plus
+ * accounts whose password is printed in the README).
+ *
+ * That is exactly what makes a fresh clone testable in five minutes — and
+ * exactly what must not exist on the machine that runs a real event. Production
+ * therefore starts empty unless `DEMO_MODE=1` says otherwise, and development
+ * starts full unless someone asks for the empty version.
+ */
+export function demoMode(): boolean {
+  const flag = (process.env.DEMO_MODE ?? '').trim().toLowerCase();
+  if (flag !== '') return ['1', 'true', 'yes', 'on'].includes(flag);
+  return process.env.NODE_ENV !== 'production';
+}
+
+/**
+ * A production database without demo content still needs one usable owner, or
+ * nobody can sign in. Credentials come from `OWNER_EMAIL` / `OWNER_PASSWORD`;
+ * with neither, a random password is generated and printed once.
+ */
+function seedProductionOwner(db: DB): void {
+  if (db.prepare("SELECT 1 FROM users WHERE role = 'OWNER' LIMIT 1").get()) return;
+  const email = (process.env.OWNER_EMAIL ?? '').trim().toLowerCase() || 'owner@krsk.local';
+  if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(email)) {
+    console.warn(`[KRSK] ${email} は OWNER 以外のアカウントとして登録済みです。昇格するには role を書き換えてください。`);
+    return;
+  }
+  const given = (process.env.OWNER_PASSWORD ?? '').trim();
+  const password = given || randomBytes(9).toString('base64url');
+  transaction(db, () => {
+    createUser(db, { email, displayName: (process.env.OWNER_NAME ?? '').trim() || '大会オーナー', password, role: 'OWNER' });
+  });
+  console.log(`[KRSK] OWNER を作成しました（${email}）`);
+  if (!given) console.log(`[KRSK] 初回パスワード: ${password} ← この1回だけ表示されます。ログイン後に変更してください。`);
+}
+
 export function seedDatabase(db: DB): void {
+  if (!demoMode()) {
+    seedProductionOwner(db);
+    return;
+  }
   const hasUsers = Number((db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number }).count) > 0;
   let ownerId = (db.prepare("SELECT user_id FROM users WHERE role = 'OWNER' ORDER BY created_at LIMIT 1").get() as { user_id: string } | undefined)?.user_id;
   if (!hasUsers) {

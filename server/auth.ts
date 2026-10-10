@@ -20,6 +20,20 @@ export interface AuthedRequest extends Request {
 const COOKIE = 'krsk_session';
 const SESSION_DAYS = 14;
 
+/**
+ * Whether the session cookie carries `Secure`.
+ *
+ * `Secure` is the right default for a deployment behind https, but a gym runs
+ * this on a LAN where the phones reach the machine over plain http — and a
+ * `Secure` cookie is simply never returned there, so login would appear to work
+ * and then fall over on the next request. `COOKIE_SECURE=0` is that switch.
+ */
+export function cookieSecure(): boolean {
+  const flag = (process.env.COOKIE_SECURE ?? '').trim().toLowerCase();
+  if (flag === '') return process.env.NODE_ENV === 'production';
+  return !['0', 'false', 'no', 'off'].includes(flag);
+}
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
   const hash = scryptSync(password, salt, 64).toString('hex');
@@ -48,7 +62,7 @@ export function issueSession(db: DB, res: Response, userId: string): void {
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure(),
     maxAge: SESSION_DAYS * 86_400_000,
     path: '/',
   });

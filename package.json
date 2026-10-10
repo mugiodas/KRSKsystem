@@ -4,13 +4,16 @@
   "private": true,
   "description": "Badminton Practice Match Management System",
   "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "dev": "concurrently -k -n API,WEB -c blue,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --host 0.0.0.0",
     "demo:reset": "node scripts/reset-demo.mjs",
-    "build": "tsc -b && vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env dist-server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc -b --pretty false",

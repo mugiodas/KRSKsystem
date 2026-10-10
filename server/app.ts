@@ -18,6 +18,7 @@ import { createSnapshotRouter } from './routes/snapshot.js';
 import { createTournamentRouter } from './routes/tournament.js';
 import { createPublicScreenRouter, createScreenRouter } from './routes/screen.js';
 import { gzipJson } from './gzip.js';
+import { demoMode } from './seed.js';
 import { maybeRunEngine } from './services/autoEngine.js';
 
 export function createApp(db: DB) {
@@ -41,6 +42,10 @@ export function createApp(db: DB) {
   });
 
   app.get('/api/demo/accounts', (_req, res) => {
+    // Handy on a laptop, and a free gift to anyone who finds a real deployment:
+    // this is the README password for `owner@krsk.local`. So it answers only
+    // where the demo accounts actually exist.
+    if (!demoMode()) throw new ApiError(404, 'DEMO_DISABLED', 'このサーバーにデモ用アカウントはありません。');
     res.json({ data: [
       { role: 'OWNER', email: 'owner@krsk.local', password: 'krsk-demo', label: 'オーナー' },
       { role: 'ADMIN', email: 'admin@krsk.local', password: 'krsk-demo', label: '運営スタッフ' },

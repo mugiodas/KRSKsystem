@@ -1,6 +1,8 @@
 node_modules/
 dist/
-data/*.sqlite*
+dist-server/
+# 実行時の状態（SQLite 本体と -wal / -shm / -journal）。大会データなのでコミットしない
+data/
 .env
 .env.*
 !.env.example
